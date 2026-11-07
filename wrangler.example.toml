@@ -1,0 +1,11 @@
+name = "itqan-tools"
+compatibility_date = "2026-10-01"
+# لا تُضف pages_build_output_dir إلا إذا أردت إدارة الإعدادات من هذا الملف بدل لوحة Cloudflare
+# pages_build_output_dir = "public"
+
+# مساحة KV لحفظ إعدادات لوحة التحكم.
+# أنشئها بالأمر: npx wrangler kv namespace create ITQAN_KV
+# ثم ضع المعرّف الناتج مكان القيمة أدناه.
+[[kv_namespaces]]
+binding = "ITQAN_KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

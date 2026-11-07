@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>لوحة التحكم</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/css/style.css">
+<style>
+  .admin { display: grid; grid-template-columns: 230px 1fr; gap: 20px; padding: 24px 0 120px; align-items: start; }
+  .side { position: sticky; top: 84px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; }
+  .side button { display: flex; width: 100%; gap: 8px; align-items: center; border: 0; background: transparent; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-weight: 700; color: var(--ink-2); text-align: start; }
+  .side button.on { background: var(--primary-50); color: var(--primary); }
+  .savebar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid var(--line); padding: 12px 0; z-index: 30; box-shadow: 0 -4px 16px rgba(0,0,0,.05); }
+  .savebar .container { display: flex; gap: 10px; align-items: center; }
+  .list-row { display: grid; grid-template-columns: 28px 1fr 1.6fr 110px auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .list-row:last-child { border-bottom: 0; }
+  .mini-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #fff; }
+  .switch { position: relative; width: 44px; height: 24px; flex: none; display: inline-block; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch span { position: absolute; inset: 0; background: #d1d5db; border-radius: 99px; transition: .15s; cursor: pointer; }
+  .switch span::before { content: ''; position: absolute; width: 18px; height: 18px; top: 3px; right: 3px; background: #fff; border-radius: 50%; transition: .15s; }
+  .switch input:checked + span { background: var(--ok); }
+  .switch input:checked + span::before { transform: translateX(-20px); }
+  .q-section { border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; background: #fcfcfd; }
+  .q-field { display: grid; grid-template-columns: 1.4fr 130px 1.2fr auto; gap: 8px; align-items: start; padding: 8px 0; border-top: 1px dashed var(--line); }
+  .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .st-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .st-card b { display: block; }
+  .ok-t { color: var(--ok); font-weight: 800; } .no-t { color: var(--danger); font-weight: 800; }
+  .login { max-width: 420px; margin: 80px auto; }
+  @media (max-width: 860px) { .admin { grid-template-columns: 1fr; } .side { position: static; display: flex; overflow-x: auto; } .side button { white-space: nowrap; } .list-row, .q-field { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="site-header"><div class="container bar"><a class="brand" href="/"><span class="logo">⚙</span><span>لوحة التحكم<small>للمالك فقط</small></span></a><nav class="nav" style="display:flex"><a href="/" target="_blank">عرض الموقع</a></nav></div></header>
+<main id="admin"><div class="container center" style="padding:80px 0">جارٍ التحميل…</div></main>
+<script type="module" src="/assets/js/admin.js"></script>
+</body>
+</html>
