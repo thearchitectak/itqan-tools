@@ -103,6 +103,7 @@ export const DEFAULT_CONFIG = {
   profile: {
     enabled: true,
     name: 'المهندس/ أحمد خالد',
+    photo: '', // صورة شخصية مرفوعة من لوحة التحكم
     links: { whatsapp: '', phone: '', email: '', telegram: '', x: '', instagram: '', snapchat: '', tiktok: '', youtube: '', linkedin: '', facebook: '', threads: '', github: '', website: '' },
   },
   // قسم دعم استمرار الأدوات

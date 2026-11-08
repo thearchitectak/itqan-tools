@@ -36,7 +36,7 @@ export function profileCard(cfg) {
   if (!p || p.enabled === false || !p.name) return null;
   const icons = socialIcons(p.links);
   return h('div', { class: 'panel profile-card' },
-    h('div', { class: 'avatar', html: ico('user-round', 30).innerHTML }),
+    /^(data:image\/|https:\/\/)/.test(p.photo || '') ? h('img', { class: 'avatar photo', src: p.photo, alt: p.name }) : h('div', { class: 'avatar', html: ico('user-round', 30).innerHTML }),
     h('div', { class: 'pc-name' }, p.name),
     icons || null);
 }
@@ -52,18 +52,38 @@ export function hasDonation(cfg) {
   return d && d.enabled !== false && ((d.accounts || []).some(a => a.iban || a.number) || (d.links || []).some(l => l.url));
 }
 
-export function donationCard(cfg, { full = false } = {}) {
+// تفاصيل الحسابات تُعرض في نافذة منبثقة عند الضغط على زر الدعم فقط
+function openDonationDetails(cfg) {
+  const d = cfg.donation;
+  document.querySelector('dialog.don-dlg')?.remove();
+  const dlg = h('dialog', { class: 'don-dlg', 'aria-label': d.title });
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.append(h('div', { class: 'don-dlg-body' },
+    h('div', { class: 'row' }, h('span', { class: 'don-ic', html: ico('hand-heart', 22).innerHTML }), h('h2', { style: { margin: 0, fontSize: '19px', flex: 1 } }, 'بيانات الدعم'), h('button', { class: 'icon-btn', type: 'button', title: 'إغلاق', 'aria-label': 'إغلاق', onclick: close }, ico('x', 20))),
+    h('div', { class: 'accounts' }, (d.accounts || []).filter(a => a.iban || a.number).map(a => {
+      const hasQr = /^data:image\//.test(a.qr || '');
+      return h('div', { class: 'account' },
+        h('div', { class: 'acc-head' }, ico('landmark', 18), h('b', {}, a.bank || 'حساب بنكي'), a.country ? h('span', { class: 'muted' }, ' — ' + a.country) : null),
+        copyRow('اسم المستفيد', a.holder, false), copyRow('رقم الآيبان', a.iban), copyRow('رقم الحساب', a.number), a.note ? h('small', { class: 'muted' }, a.note) : null,
+        hasQr ? h('div', { class: 'acc-qr' }, h('img', { src: a.qr, alt: 'رمز QR للتحويل إلى ' + (a.bank || 'الحساب') }), h('small', { class: 'muted' }, 'امسح الرمز من تطبيق البنك للتحويل مباشرة')) : null);
+    })),
+    (d.links || []).some(l => l.url) ? h('div', { class: 'actions' }, (d.links || []).filter(l => l.url).map(l => h('a', { class: 'btn', href: l.url, target: '_blank', rel: 'noopener' }, ico('heart', 18), l.label || 'ادعم'))) : null,
+    d.thanks ? h('p', { class: 'muted center', style: { margin: '14px 0 0' } }, d.thanks) : null));
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+  document.body.append(dlg); dlg.showModal();
+}
+
+export function donationCard(cfg, { open = false } = {}) {
   if (!hasDonation(cfg)) return null;
   const d = cfg.donation;
-  return h('div', { class: 'panel donation-card' },
-    h('div', { class: 'row' }, h('span', { class: 'don-ic', html: ico('hand-heart', 26).innerHTML }), h('h2', { style: { margin: 0, fontSize: '20px' } }, d.title)),
+  const card = h('div', { class: 'panel donation-card' },
+    h('span', { class: 'don-ic big', html: ico('hand-heart', 30).innerHTML }),
+    h('h2', {}, d.title),
     d.text ? h('p', {}, d.text) : null,
-    h('div', { class: 'accounts' }, (d.accounts || []).filter(a => a.iban || a.number).map(a => h('div', { class: 'account' },
-      h('div', { class: 'acc-head' }, ico('landmark', 18), h('b', {}, a.bank || 'حساب بنكي'), a.country ? h('span', { class: 'muted' }, ' — ' + a.country) : null),
-      copyRow('اسم المستفيد', a.holder, false), copyRow('رقم الآيبان', a.iban), copyRow('رقم الحساب', a.number), a.note ? h('small', { class: 'muted' }, a.note) : null,
-      /^data:image\//.test(a.qr || '') ? h('div', { class: 'acc-qr' }, h('img', { src: a.qr, alt: 'رمز QR للتحويل إلى ' + (a.bank || 'الحساب'), loading: 'lazy' }), h('small', { class: 'muted' }, 'امسح الرمز من تطبيق البنك للتحويل مباشرة')) : null))),
-    (d.links || []).some(l => l.url) ? h('div', { class: 'actions', style: { justifyContent: 'flex-start' } }, (d.links || []).filter(l => l.url).map(l => h('a', { class: 'btn sm', href: l.url, target: '_blank', rel: 'noopener' }, ico('heart', 16), l.label || 'ادعم'))) : null,
-    full && d.thanks ? h('p', { class: 'muted', style: { marginBottom: 0 } }, d.thanks) : null);
+    h('button', { class: 'btn don-btn', type: 'button', onclick: () => openDonationDetails(cfg) }, ico('heart', 18), 'ادعم الآن'));
+  if (open) setTimeout(() => openDonationDetails(cfg), 50);
+  return card;
 }
 
 // سطر صغير يدعو إلى الدعم بعد نجاح أي أداة

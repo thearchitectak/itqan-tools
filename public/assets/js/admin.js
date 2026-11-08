@@ -118,6 +118,26 @@ function qrField(a) {
   return h('div', { class: 'field', style: { gridColumn: '1/-1' } }, h('span', {}, 'صورة رمز QR للتحويل (اختيارية)'), fi, h('small', {}, 'قُص صورة الرمز من تطبيق البنك وارفعها هنا'), prev);
 }
 
+// الصورة الشخصية: تُقص مربعة من المنتصف وتُصغَّر إلى 320 بكسل قبل حفظها
+function photoField(p) {
+  const prev = h('div');
+  const draw = () => { prev.innerHTML = ''; if (p.photo) prev.append(h('div', { class: 'row' }, h('img', { src: p.photo, style: { width: '72px', height: '72px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #e5e7eb' } }), h('button', { class: 'btn light sm', type: 'button', onclick: () => { p.photo = ''; markDirty(); draw(); } }, ico('trash-2', 14), 'إزالة الصورة'))); };
+  const fi = h('input', { type: 'file', accept: 'image/*', class: 'input' });
+  fi.onchange = async () => {
+    const f = fi.files[0]; if (!f) return;
+    try {
+      const bmp = await createImageBitmap(f); const side = Math.min(bmp.width, bmp.height); const S = 320;
+      const c = document.createElement('canvas'); c.width = S; c.height = S;
+      const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+      g.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, S, S);
+      p.photo = c.toDataURL('image/jpeg', 0.85); markDirty(); draw();
+    } catch { toast('تعذّرت قراءة الصورة.', true); }
+    fi.value = '';
+  };
+  draw();
+  return h('div', { class: 'field' }, h('span', {}, 'الصورة الشخصية (اختيارية)'), fi, h('small', {}, 'تظهر دائرية فوق الاسم. يُفضّل صورة مربعة ووجهك في منتصفها.'), prev);
+}
+
 function profile(m) {
   const p = cfg.profile, d = cfg.donation;
   p.links ||= {};
@@ -126,7 +146,7 @@ function profile(m) {
     bind(inp({ dir: 'ltr', placeholder: LINK_HINT[k] || 'اسم المستخدم أو الرابط الكامل' }), p.links, k))));
   m.append(h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'الملف التعريفي'),
     h('p', { class: 'muted' }, 'يظهر في الصفحة الرئيسية وتذييل الموقع: الاسم وأيقونات التواصل فقط. الحقول الفارغة لا تظهر أيقوناتها.'),
-    h('div', { class: 'opts' }, h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), p, 'enabled', 'bool'), 'إظهار الملف التعريفي'), field('الاسم كما يظهر', bind(inp(), p, 'name'))),
+    h('div', { class: 'opts' }, h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), p, 'enabled', 'bool'), 'إظهار الملف التعريفي'), field('الاسم كما يظهر', bind(inp(), p, 'name')), photoField(p)),
     h('h3', {}, 'روابط التواصل'), links));
 
   const accBox = h('div'), linkBox = h('div');

@@ -107,7 +107,7 @@ function renderService(id) {
 }
 
 function renderSupport() {
-  const dc = donationCard(CONFIG, { full: true });
+  const dc = donationCard(CONFIG, { open: true });
   if (!dc) return renderNotFound();
   setTitle(CONFIG.donation.title);
   $('#app').innerHTML = '';
