@@ -157,6 +157,45 @@ table.tbl th, table.tbl td { border: 1px solid var(--line); padding: 7px 10px; t
 table.tbl th { background: #f1f3f5; font-weight: 800; }
 table.tbl td.n { direction: ltr; text-align: left; white-space: nowrap; }
 
+/* Feasibility modes */
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.mode { text-align: start; border: 2px solid var(--line); background: #fff; border-radius: 14px; padding: 14px 16px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; transition: border-color .15s, box-shadow .15s; }
+.mode:hover:not(:disabled) { border-color: color-mix(in srgb, var(--tool-color) 45%, #fff); }
+.mode.on { border-color: var(--tool-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool-color) 15%, transparent); background: color-mix(in srgb, var(--tool-color) 4%, #fff); }
+.mode-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mode-top b { font-size: 17px; }
+.mode-sub { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 99px; background: color-mix(in srgb, var(--tool-color) 12%, #fff); color: var(--tool-color); white-space: nowrap; }
+.mode-desc { color: var(--ink-3); font-size: 13.5px; line-height: 1.6; }
+.mode.off { background: #f3f4f6; border-color: #e5e7eb; cursor: not-allowed; filter: grayscale(1); opacity: .6; }
+.mode.off .mode-sub { background: #e5e7eb; color: #4b5563; }
+.edit-tbl td { padding: 4px; }
+.edit-tbl .input { padding: 6px 8px; min-width: 70px; }
+
+/* Profile & donation */
+.about-row { display: grid; grid-template-columns: 1fr 1.6fr; gap: 16px; padding-bottom: 56px; align-items: start; }
+.about-row.single { grid-template-columns: minmax(0, 720px); justify-content: center; }
+.profile-card { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.profile-card .avatar { width: 64px; height: 64px; border-radius: 50%; background: var(--primary-50); color: var(--primary); display: grid; place-items: center; }
+.pc-name { font-size: 20px; font-weight: 900; }
+.socials { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.social { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: #f3f4f6; color: #374151; transition: background .15s, color .15s, transform .15s; }
+.social:hover { background: var(--brand); color: #fff; transform: translateY(-2px); text-decoration: none; }
+.social[style*="#FFFC00"]:hover { color: #111; }
+.site-footer .socials { justify-content: flex-start; }
+.site-footer .social { width: 34px; height: 34px; background: #1f2937; color: #d1d5db; }
+.donation-card { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, #fff), #fff); }
+.don-ic { width: 44px; height: 44px; border-radius: 12px; background: var(--accent); color: #1f1300; display: grid; place-items: center; }
+.accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.account { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 4px; }
+.acc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.acc-row { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 6px; font-size: 14px; }
+.acc-row b { overflow-wrap: anywhere; text-align: start; }
+.acc-qr { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.acc-qr img { width: 150px; height: 150px; border-radius: 8px; border: 1px solid var(--line); background: #fff; image-rendering: pixelated; }
+.nudge { text-align: center; color: var(--ink-3); font-size: 14px; margin: 14px 0 0; display: flex; gap: 4px; justify-content: center; align-items: center; }
+.nudge svg { color: #e11d48; }
+@media (max-width: 860px) { .about-row { grid-template-columns: 1fr; } }
+
 /* Footer */
 .site-footer { background: #111827; color: #9ca3af; padding: 32px 0; margin-top: 24px; font-size: 14px; }
 .site-footer .cols { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; }

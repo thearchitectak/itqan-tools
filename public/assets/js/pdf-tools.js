@@ -1,4 +1,5 @@
 // أدوات PDF — تعمل جميعها داخل المتصفح دون رفع الملفات إلى أي خادم.
+import { supportNudge } from './profile.js';
 import { h, $, $$, ico, toast, fmtSize, libs, download, baseName, parseRanges, field, select, seg, dropzone, progressBar, readArrayBuffer, textToPng } from './ui.js';
 
 const PDF_ACCEPT = 'application/pdf,.pdf';
@@ -170,7 +171,7 @@ function fileTool(body, t, cfg) {
       partsEl = h('details', { style: { marginTop: '12px' } }, h('summary', { style: { cursor: 'pointer' } }, `تنزيل الملفات منفردة (${parts.length})`),
         h('div', { class: 'downloads' }, parts.map(o => h('button', { class: 'btn light sm block', onclick: () => download(o.blob, o.name) }, o.name))));
     }
-    resultBox.append(h('div', { class: 'panel result' }, h('h2', {}, 'اكتملت العملية بنجاح'), note ? h('p', { class: 'muted' }, note) : null, dl, partsEl,
+    resultBox.append(h('div', { class: 'panel result' }, h('h2', {}, 'اكتملت العملية بنجاح'), note ? h('p', { class: 'muted' }, note) : null, dl, partsEl, supportNudge(window.__ITQAN_CFG || {}),
       h('div', { class: 'actions' }, h('button', { class: 'btn light', onclick: () => { resultBox.classList.add('hidden'); work.classList.remove('hidden'); } }, ico('arrow-right', 18), 'العودة إلى الإعدادات'), h('button', { class: 'btn light', onclick: reset }, ico('refresh-cw', 18), 'البدء من جديد'))));
     main.length === 1 && download(main[0].blob, main[0].name);
   }

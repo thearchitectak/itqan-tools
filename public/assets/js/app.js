@@ -1,6 +1,7 @@
 import { h, $, $$, ico, esc } from './ui.js';
 import { icon } from './icons.js';
 import { CATEGORIES, mergeConfig, resolveTools } from './defaults.js';
+import { profileCard, donationCard, socialIcons, hasDonation } from './profile.js';
 
 export let CONFIG = mergeConfig({});
 let TOOLS = [];
@@ -11,6 +12,7 @@ async function loadConfig() {
     if (r.ok) CONFIG = mergeConfig(await r.json());
   } catch { /* يعمل الموقع بالإعدادات الافتراضية إن تعذّر الاتصال */ }
   TOOLS = resolveTools(CONFIG);
+  window.__ITQAN_CFG = CONFIG;
 }
 
 function applyBranding() {
@@ -25,6 +27,8 @@ function applyBranding() {
   $('#brand-logo').innerHTML = icon('layers', 20);
   $('#f-name').textContent = s.name;
   $('#f-about').textContent = s.about || '';
+  const fs = CONFIG.profile?.enabled !== false ? socialIcons(CONFIG.profile?.links, 18) : null;
+  $('#f-social').innerHTML = ''; if (fs) $('#f-social').append(fs);
   $('#f-copy').innerHTML = `© ${new Date().getFullYear()} ${esc(s.name)} — ${esc(s.footer || '')}${s.owner ? ' · ' + esc(s.owner) : ''}${s.contactEmail ? ` · <a href="mailto:${esc(s.contactEmail)}">${esc(s.contactEmail)}</a>` : ''}`;
   const an = $('#announce');
   if (s.announcement) { an.textContent = s.announcement; an.classList.remove('hidden'); } else an.classList.add('hidden');
@@ -32,6 +36,7 @@ function applyBranding() {
   const links = [['#/', 'الرئيسية'], ['#/?c=organize', 'أدوات PDF'], ['#/?c=convert', 'التحويل']];
   if (isOn('qr')) links.push(['#/tool/qr', 'رمز QR']);
   if (isOn('feasibility')) links.push(['#/tool/feasibility', 'دراسة الجدوى']);
+  if (hasDonation(CONFIG)) links.push(['#/support', 'ادعم المنصة']);
   for (const [href, t] of links) nav.append(h('a', { href }, t));
 }
 const isOn = (id) => TOOLS.find(t => t.id === id)?.enabled;
@@ -74,6 +79,8 @@ function renderHome(params) {
         h('span', { class: 'pill', html: icon('shield-check', 16) + ' ملفاتك لا تغادر جهازك' }),
         h('span', { class: 'pill', html: icon('zap', 16) + ' دون تسجيل أو اشتراك' }))),
     filters, search, grid));
+  const pc = profileCard(CONFIG), dc = donationCard(CONFIG);
+  if (pc || dc) app.firstChild.append(h('section', { class: 'about-row' + (pc && dc ? '' : ' single') }, pc, dc));
   draw();
 }
 
@@ -97,6 +104,14 @@ function renderService(id) {
     page.append(f);
   }
   app.append(page);
+}
+
+function renderSupport() {
+  const dc = donationCard(CONFIG, { full: true });
+  if (!dc) return renderNotFound();
+  setTitle(CONFIG.donation.title);
+  $('#app').innerHTML = '';
+  $('#app').append(h('div', { class: 'container tool-page', style: { maxWidth: '760px' } }, dc, profileCard(CONFIG)));
 }
 
 function renderNotFound() {
@@ -140,6 +155,7 @@ function route() {
   if (parts[0] === 'tool' && parts[1]) return renderTool(parts[1]);
   if (parts[0] === 's' && parts[1]) return renderService(parts[1]);
   if (parts[0] === 'about') return renderText('عن المنصة', CONFIG.site.about);
+  if (parts[0] === 'support') return renderSupport();
   if (parts[0] === 'privacy') return renderText('الخصوصية', CONFIG.site.privacy);
   renderNotFound();
 }

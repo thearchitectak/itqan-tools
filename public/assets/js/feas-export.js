@@ -37,7 +37,7 @@ export async function buildDocx(R, M, CONFIG) {
     P([run(`${A.city || ''}، ${A.country || ''}`, { size: 30 })], { align: AlignmentType.CENTER }),
     P([run(A.sector || '', { size: 26, color: '6B7280' })], { align: AlignmentType.CENTER }),
     P([run('تاريخ الإعداد: ' + date, { size: 24 })], { align: AlignmentType.CENTER, before: 1600 }),
-    P([run(`أُعدّت عبر منصة ${siteName} بمساعدة الذكاء الاصطناعي`, { size: 22, color: '6B7280' })], { align: AlignmentType.CENTER }),
+    P([run(R.mode === 'manual' ? `أُعدّت عبر منصة ${siteName} بالوضع اليدوي اعتمادًا على أرقام صاحب المشروع` : R.mode === 'hybrid' ? `أُعدّت عبر منصة ${siteName} بمساعدة الذكاء الاصطناعي، وأُكملت بالوضع اليدوي` : `أُعدّت عبر منصة ${siteName} بمساعدة الذكاء الاصطناعي`, { size: 22, color: '6B7280' })], { align: AlignmentType.CENTER }),
     new Paragraph({ children: [new PageBreak()] }),
   ];
   const toc = ['الملخص التنفيذي', 'وصف المشروع', 'دراسة السوق', 'تحليل SWOT', 'الدراسة الفنية', 'الدراسة القانونية والتنظيمية', 'الدراسة المالية', 'خطة التسويق', 'تحليل المخاطر', 'التوصيات والخطوات التالية', 'المصادر'];
@@ -105,9 +105,9 @@ export async function buildDocx(R, M, CONFIG) {
     ...((sm.successFactors || []).length ? [H2('عوامل النجاح الرئيسية'), ...bullets(sm.successFactors)] : []),
     H1('9. تحليل المخاطر'), table(['الخطر', 'الاحتمال', 'الأثر', 'طريقة الحد منه'], (sm.risks || []).map(r => [r.risk, r.likelihood, r.impact, r.mitigation])),
     H1('10. التوصيات والخطوات التالية'), H2('التوصيات'), ...bullets(sm.recommendations), H2('الخطوات التالية'), ...bullets(sm.nextSteps),
-    H1('11. المصادر'), ...sources(R).map(s => new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 40 }, children: [run('•  ' + s.title + ' — ', { size: 20 }), new TextRun({ text: s.url, font: FONT, size: 18, color: '1D4ED8' })] })),
+    H1('11. المصادر'), ...sources(R).map(s => new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 40 }, children: [run('•  ' + s.title + (s.url ? ' — ' : ''), { size: 20 }), new TextRun({ text: s.url, font: FONT, size: 18, color: '1D4ED8' })] })),
     P('', { after: 200 }),
-    P('تنبيه: أُعدّت هذه الدراسة آليًا بمساعدة الذكاء الاصطناعي اعتمادًا على البيانات التي قدّمها صاحب المشروع والمعلومات المتاحة على الويب وقت الإعداد. الأرقام تقديرية، ويُنصح بالتحقق منها ومراجعتها مع مختص قبل اتخاذ قرار الاستثمار.', { size: 20, color: '6B7280' }),
+    P(R.mode === 'manual' ? 'تنبيه: أُعدّت هذه الدراسة بالوضع اليدوي، فاعتمدت أرقامها على ما أدخله صاحب المشروع، وبُنيت نصوصها وفق قواعد ثابتة. يُنصح بمراجعة الأرقام مع مختص قبل اتخاذ قرار الاستثمار.' : 'تنبيه: أُعدّت هذه الدراسة آليًا بمساعدة الذكاء الاصطناعي اعتمادًا على البيانات التي قدّمها صاحب المشروع والمعلومات المتاحة على الويب وقت الإعداد. الأرقام تقديرية، ويُنصح بالتحقق منها ومراجعتها مع مختص قبل اتخاذ قرار الاستثمار.', { size: 20, color: '6B7280' }),
   ];
   const doc = new Document({
     creator: siteName, title: 'دراسة جدوى ' + (A.projectName || ''), description: 'دراسة جدوى اقتصادية',
@@ -128,7 +128,7 @@ export async function buildDocx(R, M, CONFIG) {
 function sources(R) {
   const seen = new Set(); const out = [];
   for (const s of [...(R.market?.sources || []), ...(R.technical?.sources || []), ...(R.summary?.sources || [])]) if (s?.url && !seen.has(s.url)) { seen.add(s.url); out.push(s); }
-  return out.length ? out : [{ title: 'لم يُرجع مزوّد الذكاء الاصطناعي روابط مصادر لهذه الدراسة', url: '' }];
+  return out.length ? out : [{ title: R.mode === 'manual' ? 'أرقام هذه الدراسة مقدّمة من صاحب المشروع (الوضع اليدوي)' : 'لم يُرجع مزوّد الذكاء الاصطناعي روابط مصادر لهذه الدراسة', url: '' }];
 }
 
 export async function buildXlsx(R, M, CONFIG) {

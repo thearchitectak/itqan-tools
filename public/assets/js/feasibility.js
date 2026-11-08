@@ -1,5 +1,21 @@
 import { h, $$, ico, toast, download, esc } from './ui.js';
 import { normalizeInputs, computeModel, fmtMoney, fmtPct, fmtYears, currencyCode } from './finance.js';
+import { MODE_INFO, MODE_IDS } from './defaults.js';
+import { supportNudge } from './profile.js';
+import { financialEditor, blankTechnical, manualMarket, manualSummary, verdictFor } from './feas-manual.js';
+
+const REASONS = { credit: 'نفد الرصيد حاليًا', quota: 'تجاوز الحد اليومي', nokey: 'غير مفعّل حاليًا', auth: 'غير متاح حاليًا', disabled: 'متوقف حاليًا', offline: 'غير متاح على هذه الاستضافة' };
+const PROVIDER_NAME = { anthropic: 'Claude', gemini: 'Gemini', manual: 'الوضع اليدوي' };
+
+// نص موعد تجدد الحصة، مثل: «يتجدد غدًا الساعة 11:00 ص»
+function renewText(iso) {
+  if (!iso) return '';
+  const d = new Date(iso); if (isNaN(d)) return '';
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(d) - day(new Date())) / 864e5);
+  const when = diff <= 0 ? 'اليوم' : diff === 1 ? 'غدًا' : d.toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
+  return `يتجدد ${when} الساعة ${d.toLocaleTimeString('ar-SA-u-nu-latn', { hour: 'numeric', minute: '2-digit' })}`;
+}
 
 const DRAFT_KEY = 'itqan-feas-draft', RESULT_KEY = 'itqan-feas-result';
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } }, del(k) { try { localStorage.removeItem(k); } catch { } } };
@@ -8,12 +24,43 @@ export function renderFeasibility(body, t, CONFIG) {
   const sections = CONFIG.feasibility.sections;
   let answers = store.get(DRAFT_KEY) || {};
   let step = 0;
+  let modeStatus = null, selectedMode = null;
+  const modeBox = h('div');
+  async function loadStatus(refresh) {
+    try {
+      const r = await fetch('/api/ai-status', { cache: 'no-store' });
+      if (!r.ok) throw 0;
+      const d = await r.json(); modeStatus = d.status;
+      if (!selectedMode || !modeStatus[selectedMode]?.available) selectedMode = [d.defaultMode, ...MODE_IDS].find(m => modeStatus[m]?.available) || null;
+    } catch {
+      modeStatus = { anthropic: { available: false, reason: 'offline' }, gemini: { available: false, reason: 'offline' }, manual: { available: CONFIG.feasibility.modes?.manual?.enabled !== false, reason: null } };
+      selectedMode = modeStatus.manual.available ? 'manual' : null;
+    }
+    drawModes();
+  }
+  function drawModes() {
+    modeBox.innerHTML = '';
+    if (!modeStatus) { modeBox.append(h('p', { class: 'muted' }, 'جارٍ التحقق من الطبقات المتاحة…')); return; }
+    const grid = h('div', { class: 'modes' });
+    for (const m of MODE_IDS) {
+      const st = modeStatus[m] || { available: false, reason: 'disabled' };
+      if (CONFIG.feasibility.modes?.[m]?.enabled === false) continue; // الطبقة التي أوقفها المالك لا تُعرض
+      const info = MODE_INFO[m];
+      const card = h('button', { type: 'button', class: 'mode' + (st.available ? '' : ' off') + (m === selectedMode ? ' on' : ''), disabled: !st.available, 'data-mode': m, 'aria-pressed': m === selectedMode ? 'true' : 'false' },
+        h('span', { class: 'mode-top' }, h('b', {}, info.title), h('span', { class: 'mode-sub' }, st.available ? info.sub : (REASONS[st.reason] || 'غير متاح'))),
+        h('span', { class: 'mode-desc' }, !st.available && st.resetAt ? renewText(st.resetAt) : info.desc));
+      card.onclick = () => { selectedMode = m; drawModes(); };
+      grid.append(card);
+    }
+    modeBox.append(h('h3', { style: { margin: '0 0 8px' } }, 'طريقة إعداد الدراسة'), grid);
+  }
+  loadStatus();
   const stepsBar = h('div', { class: 'steps' });
   const formBox = h('div');
   const nav = h('div', { class: 'actions' });
   const wizard = h('div', { class: 'panel' }, stepsBar, formBox, nav);
   const out = h('div');
-  body.append(h('div', { class: 'note info', style: { marginBottom: '16px' } }, 'أجب عن الأسئلة بدقة قدر الإمكان، فكلما زادت التفاصيل زادت دقة الدراسة. يبحث النظام في أحدث بيانات السوق، ثم يحسب المؤشرات المالية برمجيًا، ويُخرج الدراسة بصيغتي Word و Excel. تستغرق العملية عادةً من دقيقتين إلى خمس دقائق.'), wizard, out);
+  body.append(h('div', { class: 'note info', style: { marginBottom: '16px' } }, 'أجب عن الأسئلة بدقة قدر الإمكان، فكلما زادت التفاصيل زادت دقة الدراسة. في الخطوة الأخيرة تختار طريقة الإعداد: بالذكاء الاصطناعي مع البحث في أحدث بيانات السوق (من دقيقتين إلى خمس دقائق)، أو بالوضع اليدوي بإدخال أرقامك بنفسك. وفي الحالتين يحسب الموقع المؤشرات المالية برمجيًا، ويُخرج الدراسة بصيغتي Word و Excel.'), wizard, out);
 
   const saved = store.get(RESULT_KEY);
   if (saved?.answers && saved?.market) {
@@ -67,33 +114,54 @@ export function renderFeasibility(body, t, CONFIG) {
         const rows = s.fields.filter(f => answers[f.id] && String(answers[f.id]).trim()).map(f => h('tr', {}, h('th', { style: { width: '35%' } }, f.label), h('td', {}, Array.isArray(answers[f.id]) ? answers[f.id].join('، ') : answers[f.id])));
         formBox.append(h('h3', {}, s.title), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, rows)));
       }
+      formBox.append(h('div', { style: { marginTop: '22px' } }, modeBox)); drawModes();
       nav.append(h('button', { class: 'btn light', onclick: () => { step--; draw(); } }, ico('arrow-right', 18), 'تعديل الإجابات'),
         h('button', { class: 'btn', onclick: generate }, ico('sparkles', 18), 'إنشاء دراسة الجدوى'));
     }
   }
   draw();
 
-  async function api(stage, ticket, context) {
-    const r = await fetch('/api/feasibility', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stage, answers, ticket, context }) });
+  async function api(stage, ticket, context, mode) {
+    const r = await fetch('/api/feasibility', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stage, answers, ticket, context, mode }) });
     let d = {}; try { d = await r.json(); } catch { }
-    if (!r.ok) throw new Error(d.error || (r.status === 404 ? 'خدمة الذكاء الاصطناعي غير متاحة على هذه الاستضافة.' : 'تعذّر الاتصال بالخادم.'));
+    if (!r.ok) { const e = new Error(d.error || (r.status === 404 ? 'خدمة الذكاء الاصطناعي غير متاحة على هذه الاستضافة.' : 'تعذّر الاتصال بالخادم.')); e.unavailable = !!d.unavailable || r.status === 404; e.fatal = r.status === 429 || r.status === 403; if (d.status) { modeStatus = d.status; } throw e; }
     return d;
   }
-  async function retry(fn, tries = 2) { let e; for (let i = 0; i < tries; i++) { try { return await fn(); } catch (x) { e = x; if (/الحد اليومي|مطلوب|متوقفة/.test(x.message)) break; } } throw e; }
+  async function retry(fn, tries = 2) { let e; for (let i = 0; i < tries; i++) { try { return await fn(); } catch (x) { e = x; if (x.unavailable || x.fatal || /مطلوب/.test(x.message)) break; } } throw e; }
+
+  function runManual(prefill) {
+    wizard.classList.add('hidden'); out.innerHTML = '';
+    out.append(financialEditor({
+      answers, technical: prefill || blankTechnical(answers), title: 'أرقام المشروع (الوضع اليدوي)',
+      intro: 'أدخل تكاليف مشروعك وإيراداته المتوقعة، وسيحسب الموقع المؤشرات المالية ويُعدّ الدراسة بصيغتي Word و Excel فورًا ودون أي تكلفة.',
+      onCancel: () => { out.innerHTML = ''; wizard.classList.remove('hidden'); },
+      onDone: (tech) => {
+        const model = computeModel(normalizeInputs(tech, answers));
+        const result = { mode: 'manual', provider: 'manual', answers: structuredClone(answers), market: manualMarket(answers), technical: tech, summary: manualSummary(model, answers), createdAt: new Date().toISOString() };
+        store.set(RESULT_KEY, result); showReport(result); window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   async function generate() {
     for (let i = 0; i < sections.length; i++) if (!validate(i)) { step = i; draw(); return; }
+    if (!selectedMode) return toast('لا توجد طريقة متاحة لإعداد الدراسة حاليًا.', true);
+    if (selectedMode === 'manual') return runManual();
+    const mode = selectedMode;
+    const usedProviders = new Set();
     wizard.classList.add('hidden'); out.innerHTML = '';
     const stages = [['market', 'البحث في أحدث بيانات السوق والمنافسين والأنظمة'], ['technical', 'إعداد الدراسة الفنية وتقدير التكاليف والإيرادات'], ['model', 'حساب النموذج المالي والمؤشرات'], ['summary', 'كتابة الملخص التنفيذي والتوصيات والمخاطر']];
     const log = h('ul', { class: 'gen-log' }, stages.map(([k, tt]) => h('li', { 'data-k': k }, h('span', { class: 'dot' }), tt)));
     const panel = h('div', { class: 'panel center' }, h('h2', { style: { marginTop: 0 } }, 'جارٍ إعداد دراسة الجدوى…'), h('p', { class: 'muted' }, 'لا تغلق هذه الصفحة حتى تكتمل العملية.'), log);
     out.append(panel);
     const mark = (k, s) => { const li = log.querySelector(`[data-k="${k}"]`); li.className = s; if (s === 'done') li.querySelector('.dot').textContent = '✓'; };
+    let m = null, tc = null;
     try {
       mark('market', 'on');
-      const m = await retry(() => api('market'));
+      m = await retry(() => api('market', null, null, mode)); usedProviders.add(m.provider);
       mark('market', 'done'); mark('technical', 'on');
-      const tc = await retry(() => api('technical', m.ticket, { market: { projectDescription: m.data.projectDescription, market: m.data.market, legal: m.data.legal } }));
+      tc = await retry(() => api('technical', m.ticket, { market: { projectDescription: m.data.projectDescription, market: m.data.market, legal: m.data.legal } }, mode)); usedProviders.add(tc.provider);
       mark('technical', 'done'); mark('model', 'on');
       const model = computeModel(normalizeInputs(tc.data, answers));
       if (!model.totals.baseRevenue) throw new Error('لم تتضمن الدراسة الفنية بيانات إيرادات كافية. حاول مرة أخرى.');
@@ -101,16 +169,54 @@ export function renderFeasibility(body, t, CONFIG) {
       const cur = currencyCode(answers.currency);
       const k = model.kpis;
       const kpiText = { 'إجمالي الاستثمار': fmtMoney(k.totalInvestment, cur), 'رأس المال المتاح': fmtMoney(k.capitalAvailable, cur), 'فجوة التمويل': fmtMoney(k.fundingGap, cur), 'صافي القيمة الحالية': fmtMoney(k.npv, cur), 'معدل العائد الداخلي': fmtPct(k.irr), 'فترة الاسترداد': fmtYears(k.paybackYears), 'إيرادات السنة الأولى': fmtMoney(k.year1Revenue, cur), 'صافي ربح السنة الأولى': fmtMoney(k.year1Net, cur), 'متوسط صافي الربح السنوي': fmtMoney(k.avgAnnualNet, cur), 'نقطة التعادل الشهرية (إيرادات)': fmtMoney(k.breakEvenRevenueMonthly, cur), 'هامش الربح الإجمالي': fmtPct(k.grossMargin), 'معدل الخصم': fmtPct(k.discountRate) };
-      const sm = await retry(() => api('summary', tc.ticket, { kpis: kpiText, market: { swot: m.data.swot, competitors: (m.data.market?.competitors || []).slice(0, 6) } }));
+      const sm = await retry(() => api('summary', tc.ticket, { kpis: kpiText, market: { swot: m.data.swot, competitors: (m.data.market?.competitors || []).slice(0, 6) } }, mode)); usedProviders.add(sm.provider);
       mark('summary', 'done');
-      const result = { answers: structuredClone(answers), market: m.data, technical: tc.data, summary: sm.data, createdAt: new Date().toISOString() };
+      const used = [...usedProviders].filter(Boolean);
+      const result = { mode, provider: used.join('+'), fellBack: used.some(p => p !== mode), answers: structuredClone(answers), market: m.data, technical: tc.data, summary: sm.data, createdAt: new Date().toISOString() };
       store.set(RESULT_KEY, result);
       showReport(result);
     } catch (e) {
       console.error(e);
       panel.innerHTML = '';
-      panel.append(h('div', { class: 'note err' }, e.message), h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: generate }, ico('refresh-cw', 18), 'إعادة المحاولة'), h('button', { class: 'btn light', onclick: () => { out.innerHTML = ''; wizard.classList.remove('hidden'); } }, 'العودة إلى الأسئلة')));
+      const back = () => { out.innerHTML = ''; wizard.classList.remove('hidden'); step = sections.length; draw(); };
+      const acts = h('div', { class: 'actions' });
+      if (e.unavailable && CONFIG.feasibility.modes?.manual?.enabled !== false) {
+        // انتهى الرصيد أو الحد اليومي لكل الطبقات المتاحة: إكمال الدراسة يدويًا مع الاحتفاظ بما اكتمل
+        await loadStatus();
+        return continueManual({ m, tc, used: [...usedProviders].filter(Boolean), mode, reason: e.message });
+      }
+      if (e.unavailable) {
+        await loadStatus();
+        const alt = MODE_IDS.find(x => x !== mode && modeStatus?.[x]?.available);
+        if (alt) acts.append(h('button', { class: 'btn', onclick: () => { selectedMode = alt; alt === 'manual' ? runManual() : generate(); } }, ico(alt === 'manual' ? 'sheet' : 'sparkles', 18), alt === 'manual' ? 'المتابعة بالوضع اليدوي' : `المتابعة باستخدام ${PROVIDER_NAME[alt]}`));
+      } else acts.append(h('button', { class: 'btn', onclick: generate }, ico('refresh-cw', 18), 'إعادة المحاولة'));
+      acts.append(h('button', { class: 'btn light', onclick: back }, 'العودة واختيار طريقة أخرى'));
+      panel.append(h('div', { class: 'note err' }, e.message), acts);
     }
+  }
+
+  function continueManual({ m, tc, used, mode, reason }) {
+    wizard.classList.add('hidden'); out.innerHTML = '';
+    const done = [];
+    if (m) done.push('دراسة السوق والمنافسين وتحليل SWOT والدراسة القانونية');
+    if (tc) done.push('الدراسة الفنية وتقديرات التكاليف والإيرادات');
+    const gemini = modeStatus?.gemini;
+    const notice = h('div', { class: 'note', style: { marginBottom: '12px' } },
+      h('b', {}, 'تعذّر إكمال الدراسة بالذكاء الاصطناعي، فانتقلنا إلى الوضع اليدوي. '), reason || '',
+      gemini?.resetAt ? ` (${renewText(gemini.resetAt)})` : '',
+      done.length ? h('div', { style: { marginTop: '6px' } }, 'حُفظ ما اكتمل: ' + done.join('، ') + '.') : null,
+      h('div', { style: { marginTop: '6px' } }, tc ? 'الأرقام أدناه من تقديرات الذكاء الاصطناعي، فراجعها ثم اضغط «إنشاء الدراسة» لإكمالها.' : 'أكمل أرقام المشروع أدناه، ثم اضغط «إنشاء الدراسة» لإكمالها.'));
+    out.append(financialEditor({
+      answers, technical: tc ? tc.data : blankTechnical(answers), title: 'إكمال الدراسة بالوضع اليدوي', notice,
+      onCancel: () => { out.innerHTML = ''; wizard.classList.remove('hidden'); step = sections.length; draw(); },
+      onDone: (tech) => {
+        const technical = tc ? { ...tc.data, ...tech } : tech;
+        const model = computeModel(normalizeInputs(technical, answers));
+        const result = { mode: m ? 'hybrid' : 'manual', aiMode: mode, provider: [...used, 'manual'].join('+'), completedManually: m ? (tc ? 'summary' : 'technical') : 'all', answers: structuredClone(answers), market: m ? m.data : manualMarket(answers), technical, summary: manualSummary(model, answers), createdAt: new Date().toISOString() };
+        store.set(RESULT_KEY, result); showReport(result); window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function showReport(result) {
@@ -120,6 +226,12 @@ export function renderFeasibility(body, t, CONFIG) {
     out.innerHTML = '';
     const verdictColor = /غير/.test(result.summary.verdict) ? '#fee2e2' : /بشروط/.test(result.summary.verdict) ? '#fef3c7' : '#dcfce7';
     const k = model.kpis;
+    const editBtn = h('button', { class: 'btn light', onclick: () => editNumbers(result) }, ico('sheet', 18), 'تعديل الأرقام وإعادة الحساب');
+    const aiNames = String(result.provider || '').split('+').filter(p => p && p !== 'manual').map(p => PROVIDER_NAME[p] || p).join(' و ');
+    const byLine = result.mode === 'manual' ? 'أُعدّت بالوضع اليدوي اعتمادًا على أرقامك' : result.mode === 'hybrid' ? `أُعدّت باستخدام ${aiNames}، وأُكملت بالوضع اليدوي` : `أُعدّت باستخدام ${aiNames || PROVIDER_NAME[result.mode]}`;
+    const fbNote = result.fellBack ? h('div', { class: 'note' }, `تعذّر استخدام ${PROVIDER_NAME[result.mode]} أثناء الإعداد، فأُكملت الدراسة تلقائيًا باستخدام Gemini.`)
+      : result.mode === 'hybrid' ? h('div', { class: 'note' }, result.completedManually === 'summary' ? 'أعدّ الذكاء الاصطناعي دراسة السوق والدراسة الفنية، وأُكمل الملخص والتوصيات بالوضع اليدوي بعد تجاوز الحد المتاح.' : 'أعدّ الذكاء الاصطناعي دراسة السوق، وأُكملت الأرقام والملخص بالوضع اليدوي بعد تجاوز الحد المتاح.') : null;
+    const editedNote = result.edited ? h('div', { class: 'note info' }, 'عُدّلت أرقام هذه الدراسة يدويًا، وأُعيد حساب المؤشرات والحكم على الجدوى.') : null;
     const dlWord = h('button', { class: 'btn' }, ico('file-text', 18), 'تنزيل الدراسة (Word)');
     const dlXls = h('button', { class: 'btn' }, ico('sheet', 18), 'تنزيل النموذج المالي (Excel)');
     dlWord.onclick = async () => { dlWord.disabled = true; try { const m = await import('./feas-export.js'); download(await m.buildDocx(result, model, CONFIG), `دراسة-جدوى-${safeName(result.answers.projectName)}.docx`); } catch (e) { console.error(e); toast('تعذّر إنشاء ملف Word: ' + e.message, true); } dlWord.disabled = false; };
@@ -129,7 +241,8 @@ export function renderFeasibility(body, t, CONFIG) {
     const list = (a) => h('ul', {}, (a || []).map(x => h('li', {}, x)));
     out.append(h('div', { class: 'panel report' },
       h('div', { class: 'row' }, h('h1', { style: { margin: 0, fontSize: '24px' } }, 'دراسة جدوى: ' + (result.answers.projectName || '')), h('span', { class: 'spacer' }), dlWord, dlXls),
-      h('p', { class: 'muted' }, `${result.answers.city || ''}، ${result.answers.country || ''} — أُعدّت في ${new Date(result.createdAt).toLocaleDateString('ar-SA-u-ca-gregory-nu-latn')}`),
+      h('p', { class: 'muted' }, `${result.answers.city || ''}، ${result.answers.country || ''} — ${byLine} في ${new Date(result.createdAt).toLocaleDateString('ar-SA-u-ca-gregory-nu-latn')}`),
+      fbNote, editedNote,
       h('div', { class: 'verdict', style: { background: verdictColor } }, 'الحكم على الجدوى: ' + (result.summary.verdict || '—')),
       h('div', { class: 'kpis' }, [['إجمالي الاستثمار', fmtMoney(k.totalInvestment, cur)], ['صافي القيمة الحالية', fmtMoney(k.npv, cur)], ['معدل العائد الداخلي', fmtPct(k.irr)], ['فترة الاسترداد', fmtYears(k.paybackYears)], ['إيرادات السنة الأولى', fmtMoney(k.year1Revenue, cur)], ['نقطة التعادل الشهرية', fmtMoney(k.breakEvenRevenueMonthly, cur)]].map(([a, b]) => h('div', { class: 'kpi' }, h('span', {}, a), h('b', {}, b)))),
       k.fundingGap > 0 ? h('div', { class: 'note' }, `تنبيه: إجمالي الاستثمار المطلوب يتجاوز رأس المال المتاح والتمويل بمقدار ${fmtMoney(k.fundingGap, cur)}.`) : null,
@@ -143,7 +256,25 @@ export function renderFeasibility(body, t, CONFIG) {
       h('h2', {}, 'المخاطر'), tbl(['الخطر', 'الاحتمال', 'الأثر', 'طريقة الحد منه'], (result.summary.risks || []).map(r => [r.risk, r.likelihood, r.impact, r.mitigation])),
       h('h2', {}, 'التوصيات'), list(result.summary.recommendations),
       h('p', { class: 'muted', style: { marginTop: '24px' } }, 'هذا عرض مختصر. تجد الدراسة كاملة بجميع أقسامها في ملف Word، والنموذج المالي القابل للتعديل بالمعادلات في ملف Excel.'),
-      h('div', { class: 'actions' }, h('button', { class: 'btn light', onclick: () => { out.innerHTML = ''; wizard.classList.remove('hidden'); step = 0; draw(); } }, ico('refresh-cw', 18), 'إعداد دراسة جديدة أو تعديل الإجابات'))));
+      supportNudge(CONFIG),
+      h('div', { class: 'actions' }, editBtn, h('button', { class: 'btn light', onclick: () => { out.innerHTML = ''; wizard.classList.remove('hidden'); step = 0; draw(); } }, ico('refresh-cw', 18), 'إعداد دراسة جديدة أو تعديل الإجابات'))));
+  }
+
+  function editNumbers(result) {
+    out.innerHTML = '';
+    out.append(financialEditor({
+      answers: result.answers, technical: result.technical, title: 'تعديل أرقام الدراسة', action: 'إعادة الحساب',
+      intro: 'عدّل أي رقم، ثم اضغط «إعادة الحساب» لتحديث المؤشرات وملفي Word و Excel.',
+      onCancel: () => showReport(result),
+      onDone: (tech) => {
+        const r = structuredClone(result); r.technical = { ...r.technical, ...tech };
+        const model = computeModel(normalizeInputs(r.technical, r.answers));
+        if (r.mode === 'manual' || r.mode === 'hybrid') r.summary = manualSummary(model, r.answers);
+        else { const ms = manualSummary(model, r.answers); r.summary = { ...r.summary, verdict: verdictFor(model), executiveSummary: ms.executiveSummary + '\n' + (r.summary.executiveSummary || '').split('\n').slice(1).join('\n'), verdictReason: ms.verdictReason }; r.edited = true; }
+        store.set(RESULT_KEY, r); showReport(r); window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 }
 const safeName = (s) => String(s || 'مشروع').replace(/[\\/:*?"<>|]+/g, '').trim().slice(0, 60) || 'مشروع';

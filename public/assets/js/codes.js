@@ -1,5 +1,6 @@
 // مولّد رموز QR والباركود الخطي — رموز ثابتة (Static) تُخزَّن بياناتها داخل الرمز نفسه،
 // فلا تعتمد على أي خادم ولا تنتهي صلاحيتها أبدًا.
+import { supportNudge } from './profile.js';
 import { h, $$, ico, toast, libs, download, field, select } from './ui.js';
 
 const QR_TYPES = [
@@ -110,7 +111,7 @@ export async function renderQR(body, t) {
       h('div', { class: 'qr-preview' },
         h('div', { class: 'panel' }, preview, dataInfo,
           h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => dl('png') }, ico('download', 18), 'PNG'), h('button', { class: 'btn', onclick: () => dl('svg') }, ico('download', 18), 'SVG'), h('button', { class: 'btn light', onclick: () => dl('jpeg') }, 'JPG')),
-          h('p', { class: 'muted', style: { fontSize: '13px' } }, 'صيغة SVG مناسبة للطباعة بأي حجم دون فقدان الجودة. اختبر الرمز بكاميرا الجوال قبل الطباعة.')))));
+          h('p', { class: 'muted', style: { fontSize: '13px' } }, 'صيغة SVG مناسبة للطباعة بأي حجم دون فقدان الجودة. اختبر الرمز بكاميرا الجوال قبل الطباعة.'), supportNudge(window.__ITQAN_CFG || {})))));
   setType('url');
 }
 

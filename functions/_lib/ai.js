@@ -3,7 +3,8 @@ import { DEFAULT_MODELS } from '../../public/assets/js/defaults.js';
 // استدعاء مزوّد الذكاء الاصطناعي المختار مع تفعيل البحث في الويب للحصول على أحدث بيانات السوق.
 export async function callAI(env, { provider, model, system, prompt, webSearch, maxTokens = 16000 }) {
   provider = provider || 'anthropic';
-  if (env.AI_MOCK === '1') return mock(prompt);
+  if (env.AI_MOCK === '1' && env.AI_MOCK_FAIL_AT) { const st = prompt.includes('"executiveSummary"') ? 'summary' : prompt.includes('"equipment"') ? 'technical' : 'market'; if (env.AI_MOCK_FAIL_AT.split(',').includes(st)) throw aiError(provider, provider === 'gemini' ? 429 : 400, provider === 'gemini' ? 'quota exhausted' : 'Your credit balance is too low'); }
+  if (env.AI_MOCK === '1') { if (env.AI_MOCK_DOWN && env.AI_MOCK_DOWN.split(',').includes(provider)) throw aiError(provider, provider === 'gemini' ? 429 : 400, provider === 'gemini' ? 'Resource has been exhausted (e.g. check quota).' : 'Your credit balance is too low to access the Anthropic API.'); return mock(prompt); }
   model = model || DEFAULT_MODELS[provider];
   if (provider === 'anthropic') return anthropic(env, model, system, prompt, webSearch, maxTokens);
   if (provider === 'gemini') return gemini(env, model, system, prompt, webSearch, maxTokens);
@@ -12,7 +13,7 @@ export async function callAI(env, { provider, model, system, prompt, webSearch, 
 }
 
 async function anthropic(env, model, system, prompt, webSearch, maxTokens) {
-  if (!env.ANTHROPIC_API_KEY) throw new Error('لم يُضبط مفتاح ANTHROPIC_API_KEY.');
+  if (!env.ANTHROPIC_API_KEY) throw Object.assign(new Error('لم يُضبط مفتاح Claude.'), { code: 'nokey' });
   const messages = [{ role: 'user', content: prompt }];
   const sources = [];
   let text = '';
@@ -23,7 +24,7 @@ async function anthropic(env, model, system, prompt, webSearch, maxTokens) {
       body: JSON.stringify({ model, max_tokens: maxTokens, system, messages, ...(webSearch ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }] } : {}) }),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error('خطأ من خدمة Anthropic: ' + (data?.error?.message || r.status));
+    if (!r.ok) throw aiError('anthropic', r.status, data?.error?.message);
     for (const b of data.content || []) {
       if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) b.content.forEach(x => x.url && sources.push({ title: x.title || x.url, url: x.url }));
     }
@@ -36,7 +37,7 @@ async function anthropic(env, model, system, prompt, webSearch, maxTokens) {
 }
 
 async function gemini(env, model, system, prompt, webSearch, maxTokens) {
-  if (!env.GEMINI_API_KEY) throw new Error('لم يُضبط مفتاح GEMINI_API_KEY.');
+  if (!env.GEMINI_API_KEY) throw Object.assign(new Error('لم يُضبط مفتاح Gemini.'), { code: 'nokey' });
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
     body: JSON.stringify({
@@ -47,7 +48,7 @@ async function gemini(env, model, system, prompt, webSearch, maxTokens) {
     }),
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error('خطأ من خدمة Gemini: ' + (data?.error?.message || r.status));
+  if (!r.ok) throw aiError('gemini', r.status, data?.error?.message);
   const cand = data.candidates?.[0];
   const text = (cand?.content?.parts || []).map(p => p.text || '').join('');
   const sources = (cand?.groundingMetadata?.groundingChunks || []).map(c => c.web).filter(Boolean).map(w => ({ title: w.title || w.uri, url: w.uri }));
@@ -95,4 +96,28 @@ function mock(prompt) {
     summary: { executiveSummary: 'يظهر المشروع مؤشرات إيجابية.', verdict: 'مجدٍ', verdictReason: 'صافي القيمة الحالية موجبة.', marketingPlan: [{ channel: 'إنستغرام', action: 'حملات محلية', budgetShare: '40٪' }], risks: [{ risk: 'ارتفاع الإيجار', likelihood: 'متوسط', impact: 'مرتفع', mitigation: 'عقد طويل الأجل' }], successFactors: ['جودة المنتج'], recommendations: ['البدء بقائمة مختصرة'], nextSteps: ['اختيار الموقع'] },
   };
   return { text: JSON.stringify(D[m]), sources: [{ title: 'مصدر تجريبي', url: 'https://example.com' }] };
+}
+
+// تصنيف أخطاء المزوّد: credit (نفد الرصيد) | quota (تجاوز الحصة) | auth (مفتاح غير صالح) | busy (ضغط مؤقت) | other
+export function classify(provider, status, msg = '') {
+  const m = String(msg);
+  if (provider === 'anthropic') {
+    if (/credit balance|billing|purchase credits/i.test(m) || status === 402) return 'credit';
+    if (status === 401 || status === 403) return 'auth';
+    if (status === 429 || status === 529 || status >= 500) return 'busy';
+    return 'other';
+  }
+  if (provider === 'gemini') {
+    if (status === 429 || /quota|exhausted/i.test(m)) return 'quota';
+    if (status === 401 || status === 403 || /api key not valid|permission/i.test(m)) return 'auth';
+    if (status >= 500) return 'busy';
+    return 'other';
+  }
+  return 'other';
+}
+export function aiError(provider, status, msg) {
+  const code = classify(provider, status, msg);
+  const name = provider === 'anthropic' ? 'Claude' : provider === 'gemini' ? 'Gemini' : provider;
+  const text = { credit: `نفد رصيد ${name}.`, quota: `تجاوز ${name} حصة الاستخدام المجانية الحالية.`, auth: `مفتاح ${name} غير صالح.`, busy: `خدمة ${name} مشغولة حاليًا.` }[code] || `خطأ من خدمة ${name}: ${msg || status}`;
+  return Object.assign(new Error(text), { code, provider, status });
 }

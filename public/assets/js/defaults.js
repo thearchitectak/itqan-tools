@@ -34,7 +34,7 @@ export const BUILTIN_TOOLS = [
   { id: 'qr', category: 'codes', icon: 'qr-code', color: '#0f766e', title: 'مولّد رمز QR الدائم', desc: 'أنشئ رموز QR ثابتة تعمل مدى الحياة مجانًا، دون اشتراك ودون انتهاء صلاحية.' },
   { id: 'barcode', category: 'codes', icon: 'barcode', color: '#0f766e', title: 'مولّد الباركود الخطي', desc: 'أنشئ باركود المنتجات (EAN و UPC و Code 128 وغيرها) بصيغ PNG و SVG.' },
 
-  { id: 'feasibility', category: 'business', icon: 'sparkles', color: '#c2255c', title: 'دراسة الجدوى بالذكاء الاصطناعي', desc: 'أجب عن أسئلة مشروعك، واحصل على دراسة جدوى متكاملة بصيغتي Word و Excel مبنية على أحدث بيانات السوق.' },
+  { id: 'feasibility', category: 'business', icon: 'sparkles', color: '#c2255c', title: 'دراسة الجدوى بالذكاء الاصطناعي', desc: 'أجب عن أسئلة مشروعك، واحصل على دراسة جدوى متكاملة بصيغتي Word و Excel، بالذكاء الاصطناعي وأحدث بيانات السوق أو بإدخال أرقامك يدويًا.' },
 ];
 
 export const DEFAULT_FEASIBILITY_SECTIONS = [
@@ -99,19 +99,47 @@ export const DEFAULT_CONFIG = {
     privacy: 'تُعالَج ملفات PDF والصور والمستندات داخل متصفحك مباشرة، ولا تُرفع إلى أي خادم. أما دراسة الجدوى فتُرسل إجاباتك عن الأسئلة إلى خدمة الذكاء الاصطناعي لإعداد الدراسة فقط، ولا تُحفظ لدينا.',
     footer: 'جميع الحقوق محفوظة',
   },
+  // الملف التعريفي للمالك: الاسم وروابط التواصل فقط (اسم المستخدم أو الرابط الكامل)
+  profile: {
+    enabled: true,
+    name: 'المهندس/ أحمد خالد',
+    links: { whatsapp: '', phone: '', email: '', telegram: '', x: '', instagram: '', snapchat: '', tiktok: '', youtube: '', linkedin: '', facebook: '', threads: '', github: '', website: '' },
+  },
+  // قسم دعم استمرار الأدوات
+  donation: {
+    enabled: true,
+    title: 'ادعم استمرار الأدوات المجانية',
+    text: 'جميع الأدوات في المنصة مجانية، وستبقى كذلك. إن أفادتك، فمساهمتك مهما كانت تساعد على تغطية تكاليف التشغيل والذكاء الاصطناعي، وتطوير أدوات جديدة.',
+    accounts: [], // { bank, holder, iban, number, country, note }
+    links: [],    // { label, url }
+    thanks: 'شكرًا لدعمك، فبمساهمتك تستمر الأدوات مجانية للجميع.',
+  },
   // تخصيصات الأدوات المدمجة: { [id]: { enabled, title, desc, order } }
   tools: {},
   // خدمات يضيفها المالك من لوحة التحكم
   customServices: [],
   feasibility: {
     enabled: true,
-    provider: 'anthropic', // anthropic | gemini | openai
-    model: '',            // فارغ = النموذج الافتراضي للمزوّد
+    // طبقات الخدمة الثلاث: يختار المستخدم بينها، وتُعطَّل الطبقة غير المتاحة تلقائيًا
+    modes: {
+      anthropic: { enabled: true, model: '' }, // فارغ = النموذج الافتراضي
+      gemini: { enabled: true, model: '' },
+      manual: { enabled: true },
+    },
+    defaultMode: 'anthropic', // anthropic | gemini | manual
+    autoFallback: true,       // الانتقال تلقائيًا إلى Gemini إذا تعذّر Claude أثناء الإعداد
     webSearch: true,
     dailyLimitPerIp: 3,
     extraInstructions: '',
     sections: DEFAULT_FEASIBILITY_SECTIONS,
   },
+};
+
+export const MODE_IDS = ['anthropic', 'gemini', 'manual'];
+export const MODE_INFO = {
+  anthropic: { title: 'Claude', sub: 'الأدق تحليلًا', desc: 'تحليل معمّق وأرقام من أحدث بيانات السوق عبر البحث في الويب.' },
+  gemini: { title: 'Gemini', sub: 'مجاني', desc: 'دراسة كاملة مع البحث في Google، بحصة استخدام يومية مجانية.' },
+  manual: { title: 'الوضع اليدوي', sub: 'دون ذكاء اصطناعي', desc: 'تُدخل الأرقام بنفسك، ويحسب الموقع النموذج المالي ويُخرج الدراسة فورًا.' },
 };
 
 export const DEFAULT_MODELS = {
@@ -135,6 +163,16 @@ export function mergeConfig(saved) {
   const cfg = deepMerge(structuredClone(DEFAULT_CONFIG), saved || {});
   if (!Array.isArray(cfg.feasibility.sections) || !cfg.feasibility.sections.length) cfg.feasibility.sections = structuredClone(DEFAULT_FEASIBILITY_SECTIONS);
   if (!Array.isArray(cfg.customServices)) cfg.customServices = [];
+  if (!Array.isArray(cfg.donation.accounts)) cfg.donation.accounts = [];
+  if (!Array.isArray(cfg.donation.links)) cfg.donation.links = [];
+  // ترحيل الإعدادات القديمة (مزوّد واحد) إلى نظام الطبقات
+  const f = cfg.feasibility;
+  if (f.provider && MODE_IDS.includes(f.provider)) {
+    if (!saved?.feasibility?.defaultMode) f.defaultMode = f.provider;
+    if (f.model && !f.modes[f.provider].model) f.modes[f.provider].model = f.model;
+  }
+  delete f.provider; delete f.model;
+  if (!MODE_IDS.includes(f.defaultMode)) f.defaultMode = 'anthropic';
   return cfg;
 }
 

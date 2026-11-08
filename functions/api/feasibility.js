@@ -1,5 +1,6 @@
 import { json, err, getConfig, clientIp, signToken, verifyToken } from '../_lib/core.js';
 import { callAI, extractJson } from '../_lib/ai.js';
+import { providerStatus, markDown } from '../_lib/status.js';
 
 const SYSTEM = (extra) => `أنت مستشار خبير في إعداد دراسات الجدوى الاقتصادية للمشروعات في العالم العربي.
 - اكتب جميع النصوص باللغة العربية الفصحى السليمة فقط، بأسلوب مهني واضح، ودون أي عبارات عامية.
@@ -98,19 +99,27 @@ export async function onRequestPost({ request, env }) {
   const raw = JSON.stringify(body);
   if (raw.length > 120_000) return err('حجم البيانات كبير جدًا.');
   const { stage, answers, context, ticket } = body;
+  const mode = body.mode === 'gemini' ? 'gemini' : 'anthropic';
   if (!['market', 'technical', 'summary'].includes(stage)) return err('مرحلة غير معروفة.');
   const v = validateAnswers(answers, cfg.feasibility.sections); if (v) return err(v);
   const ip = clientIp(request);
 
-  let newTicket = null;
+  // اختيار المزوّد: الطبقة التي اختارها المستخدم، ثم Gemini احتياطًا إذا تعذّر Claude
+  const status = await providerStatus(env, cfg, { probeNow: false });
+  const order = [mode];
+  if (mode === 'anthropic' && cfg.feasibility.autoFallback !== false) order.push('gemini');
+  const candidates = order.filter(p => status[p]?.available);
+  if (!candidates.length) return json({ error: status[mode]?.reason === 'disabled' ? 'هذه الطبقة متوقفة حاليًا.' : 'الطبقة المختارة غير متاحة حاليًا. اختر طبقة أخرى أو الوضع اليدوي.', unavailable: true, status }, 503);
+
+  let newTicket = null, rlKey = null, rlUsed = 0;
   if (stage === 'market') {
     // حد الاستخدام اليومي لكل مستخدم
     const limit = Number(cfg.feasibility.dailyLimitPerIp) || 0;
     if (env.ITQAN_KV && limit > 0) {
       const day = new Date().toISOString().slice(0, 10); const key = `rl:${day}:${ip}`;
-      const used = Number(await env.ITQAN_KV.get(key)) || 0;
-      if (used >= limit) return err(`وصلت إلى الحد اليومي المسموح به (${limit} دراسات). يمكنك المحاولة غدًا.`, 429);
-      await env.ITQAN_KV.put(key, String(used + 1), { expirationTtl: 90000 });
+      rlUsed = Number(await env.ITQAN_KV.get(key)) || 0;
+      if (rlUsed >= limit) return err(`وصلت إلى الحد اليومي المسموح به (${limit} دراسات). يمكنك المحاولة غدًا، أو استخدام الوضع اليدوي.`, 429);
+      rlKey = key;
     }
     newTicket = await signToken(env, { ip, exp: Date.now() + 2 * 3600e3, t: 'feas' });
   } else {
@@ -118,21 +127,35 @@ export async function onRequestPost({ request, env }) {
     if (!t || t.t !== 'feas' || t.ip !== ip) return err('انتهت صلاحية جلسة إعداد الدراسة. ابدأ من جديد.', 403);
   }
 
+  let res = null, used = null, lastErr = null;
+  for (const p of candidates) {
+    try {
+      res = await callAI(env, {
+        provider: p, model: cfg.feasibility.modes[p].model,
+        system: SYSTEM(cfg.feasibility.extraInstructions), prompt: buildPrompt(stage, answers, cfg, context),
+        webSearch: cfg.feasibility.webSearch !== false && stage !== 'summary',
+        maxTokens: stage === 'technical' ? 12000 : 10000,
+      });
+      used = p; break;
+    } catch (e) {
+      lastErr = e;
+      if (['credit', 'quota', 'auth', 'nokey'].includes(e.code)) { await markDown(env, p, e.code); continue; }
+      if (e.code === 'busy') continue;
+      break;
+    }
+  }
+  if (!res) return json({ error: 'تعذّر إعداد هذا الجزء من الدراسة: ' + (lastErr?.message || 'خطأ غير معروف'), unavailable: ['credit', 'quota', 'auth', 'nokey'].includes(lastErr?.code), status: await providerStatus(env, cfg, { probeNow: false }) }, 502);
+
   try {
-    const res = await callAI(env, {
-      provider: cfg.feasibility.provider, model: cfg.feasibility.model,
-      system: SYSTEM(cfg.feasibility.extraInstructions), prompt: buildPrompt(stage, answers, cfg, context),
-      webSearch: cfg.feasibility.webSearch !== false && stage !== 'summary',
-      maxTokens: stage === 'technical' ? 12000 : 10000,
-    });
     const data = extractJson(res.text);
+    if (rlKey) { try { await env.ITQAN_KV.put(rlKey, String(rlUsed + 1), { expirationTtl: 90000 }); } catch { } }
     const seen = new Set();
     data.sources = (res.sources || []).filter(s => s.url && !seen.has(s.url) && seen.add(s.url)).slice(0, 25);
     if (stage === 'summary' && env.ITQAN_KV) {
       try { const u = (await env.ITQAN_KV.get('usage:feasibility', 'json')) || { total: 0 }; u.total++; u.last = new Date().toISOString(); await env.ITQAN_KV.put('usage:feasibility', JSON.stringify(u)); } catch { }
     }
-    return json({ data, ticket: newTicket || ticket });
+    return json({ data, ticket: newTicket || ticket, provider: used, fallback: used !== mode ? { from: mode, to: used } : null });
   } catch (e) {
-    return err('تعذّر إعداد هذا الجزء من الدراسة: ' + e.message, 502);
+    return err('تعذّر قراءة نتيجة هذا الجزء من الدراسة، فأعد المحاولة: ' + e.message, 502);
   }
 }
