@@ -58,6 +58,12 @@ export function renderTexMaps(body) {
     saveBtn.disabled = false;
   };
 
+  // صورة محوّلة من أداة «خامات الريندر»
+  if (window.__itqPendingTexture) {
+    const src = window.__itqPendingTexture; window.__itqPendingTexture = null;
+    const u = src.toDataURL('image/jpeg', 0.95); const im = new Image(); im.src = u;
+    im.decode().then(() => { img = im; genBtn.disabled = false; preview.innerHTML = ''; preview.append(h('figure', {}, h('img', { src: u, alt: '' }), h('figcaption', {}, 'الصورة الأصلية'))); status.textContent = 'الصورة جاهزة. أدخل اسمها ونوعها ثم اضغط «استخراج الخرائط».'; });
+  }
   body.append(h('div', { class: 'rs' }, dest.el,
     h('div', { class: 'panel' }, h('h3', {}, ico('image', 20), ' صورة الخامة'), dz,
       h('div', { class: 'note warn' }, 'تُستخرج الخرائط حسابيًا من صورة واحدة، فجودتها أقل من الخامات الممسوحة ضوئيًا في المكتبات. هذه الأداة مناسبة للخامات الخاصة غير الموجودة في المكتبات، مثل رخام بعينه أو قماش اختاره العميل.'),

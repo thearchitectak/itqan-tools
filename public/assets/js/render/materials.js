@@ -1,13 +1,14 @@
 // أداة «خامات الريندر»: من صورة الشوت أو بالبحث في المكتبة، ثم التجهيز والحفظ في مكتبة خامات إتقان.
 import { h, ico, toast, select, seg, dropzone } from '../ui.js';
 import { aiPicker, vision } from '../ai-tools.js';
-import { searchMaterials, resolutionsOf, fetchMaps, RES_ORDER } from './lib.js';
+import { searchMaterials, resolutionsOf, fetchMaps, RES_ORDER, smartFetch } from './lib.js';
 import { makeInfo, materialFiles, makeWriter, canPickFolder, savedFolder, chooseFolder, ensurePermission, ROOT_NAME } from './pack.js';
 import { imageToMaps } from './maps.js';
 
 const CATS = [['', 'الكل'], ['marble', 'رخام'], ['wood', 'خشب'], ['parquet floor', 'باركيه'], ['tiles', 'بلاط'], ['concrete', 'خرسانة'], ['plaster', 'محارة ودهان'], ['brick', 'طوب'], ['stone', 'حجر'], ['metal', 'معادن'], ['fabric', 'أقمشة'], ['leather', 'جلد'], ['carpet', 'سجاد'], ['asphalt', 'أسفلت'], ['ground', 'أرض وتربة'], ['grass', 'نجيل'], ['gravel', 'حصى'], ['roof', 'أسقف']];
 const CAT_AR = { wood: 'خشب', floor_wood: 'أرضية خشبية', marble: 'رخام', stone: 'حجر', concrete: 'خرسانة', plaster: 'محارة', paint: 'دهان', brick: 'طوب', tiles: 'بلاط', ceramic: 'سيراميك', terrazzo: 'تيرازو', metal: 'معدن', fabric: 'قماش', leather: 'جلد', carpet: 'سجاد', wallpaper: 'ورق حائط', glass: 'زجاج', plastic: 'بلاستيك', asphalt: 'أسفلت', ground: 'أرض', grass: 'نجيل', gravel: 'حصى', sand: 'رمل', roofing: 'سقف', other: 'أخرى' };
 const CAT_EN = { floor_wood: 'wood floor', wood: 'wood', marble: 'marble', stone: 'stone', concrete: 'concrete', plaster: 'plaster', paint: 'plaster', brick: 'brick', tiles: 'tiles', ceramic: 'tiles', terrazzo: 'terrazzo', metal: 'metal', fabric: 'fabric', leather: 'leather', carpet: 'carpet', wallpaper: 'fabric', asphalt: 'asphalt', ground: 'ground', grass: 'grass', gravel: 'gravel', sand: 'sand', roofing: 'roof' };
+const CAT_FROM = { marble: 'marble', wood: 'wood', 'parquet floor': 'floor_wood', tiles: 'tiles', concrete: 'concrete', plaster: 'plaster', brick: 'brick', stone: 'stone', metal: 'metal', fabric: 'fabric', leather: 'leather', carpet: 'carpet', asphalt: 'asphalt', ground: 'ground', grass: 'grass', gravel: 'gravel', roof: 'roofing' };
 const RES_AR = { '2k': '2K', '4k': '4K', '8k': '8K', '16k': '16K' };
 const fmtMB = (b) => (b / 1048576).toFixed(b > 1048576 * 10 ? 0 : 1) + ' م.ب';
 
@@ -124,10 +125,7 @@ export function renderMaterials(body) {
   const shotResults = h('div');
   const analyze = async () => {
     shotResults.innerHTML = '';
-    if (!picker.isAi) {
-      shotResults.append(h('div', { class: 'note info' }, 'وضع «على جهازك»: لا يُحلَّل الشوت تلقائيًا. انظر إلى الصورة واختر الخامات المطابقة من تبويب «البحث في المكتبة»، أو اختر طريقة بالذكاء الاصطناعي لتحليلها.'));
-      return;
-    }
+    if (!picker.isAi) { localMatch(); return; }
     shotResults.append(h('p', { class: 'muted center' }, 'جارٍ تحليل اللقطة والتعرّف على الخامات…'));
     let d;
     try { d = (await vision('shot', shotImg, { provider: picker.value, maxSide: 1600 })).data; }
@@ -192,6 +190,52 @@ export function renderMaterials(body) {
     } catch (e) { toast(e.message, true, 6000); }
     btn.disabled = false; btn.lastChild.textContent = old;
   };
+
+  /* ---------- وضع «على جهازك»: مطابقة بصرية دون ذكاء اصطناعي ---------- */
+  // بصمة الصورة: متوسط اللون (Lab) والتباين وكثافة الحواف
+  const signature = (src, box) => {
+    const S = 96, c = document.createElement('canvas'); c.width = c.height = S;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    const [sx, sy, sw, sh] = box || [0, 0, src.width, src.height];
+    x.drawImage(src, sx, sy, sw, sh, 0, 0, S, S);
+    const d = x.getImageData(0, 0, S, S).data; let r = 0, g = 0, b = 0; const L = new Float32Array(S * S);
+    for (let i = 0; i < S * S; i++) { r += d[i * 4]; g += d[i * 4 + 1]; b += d[i * 4 + 2]; L[i] = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2]; }
+    const n = S * S; r /= n; g /= n; b /= n;
+    let mean = 0; for (const v of L) mean += v; mean /= n; let vr = 0, ed = 0;
+    for (let i = 0; i < n; i++) { vr += (L[i] - mean) ** 2; if (i % S && i > S) ed += Math.abs(L[i] - L[i - 1]) + Math.abs(L[i] - L[i - S]); }
+    return { r, g, b, lum: mean, con: Math.sqrt(vr / n), edge: ed / n };
+  };
+  const colorWords = (s) => {
+    const mx = Math.max(s.r, s.g, s.b), mn = Math.min(s.r, s.g, s.b), sat = mx ? (mx - mn) / mx : 0;
+    if (sat < 0.12) return [s.lum > 190 ? 'white' : s.lum < 60 ? 'black' : 'grey'];
+    let hue = 0; const d = mx - mn;
+    if (mx === s.r) hue = ((s.g - s.b) / d) % 6; else if (mx === s.g) hue = (s.b - s.r) / d + 2; else hue = (s.r - s.g) / d + 4; hue *= 60; if (hue < 0) hue += 360;
+    if (hue < 20 || hue >= 340) return ['red']; if (hue < 50) return s.lum > 170 ? ['beige'] : ['brown']; if (hue < 70) return ['yellow']; if (hue < 170) return ['green']; if (hue < 260) return ['blue']; return ['purple'];
+  };
+  const dist = (a, b) => Math.hypot((a.r - b.r) / 2.2, (a.g - b.g) / 2.2, (a.b - b.b) / 2.2, (a.con - b.con) * 1.4, (a.edge - b.edge) * 2.5);
+  const thumbSig = async (m) => {
+    try { const r = await smartFetch(m.thumb); const bmp = await createImageBitmap(await r.blob()); return signature(bmp); } catch { return null; }
+  };
+  async function localMatch(typeWord) {
+    shotResults.innerHTML = '';
+    const sig = signature(shotImg, [shotImg.width * 0.15, shotImg.height * 0.15, shotImg.width * 0.7, shotImg.height * 0.7]);
+    const words = [...(typeWord ? typeWord.split(' ') : []), ...colorWords(sig)];
+    const typeChips = h('div', { class: 'rs-chips' }, h('span', { class: 'muted', style: { alignSelf: 'center' } }, 'ما نوع الخامة؟'),
+      CATS.filter(c => c[0]).map(([v, t]) => h('button', { type: 'button', class: v === typeWord ? 'on' : '', onclick: () => localMatch(v) }, t)));
+    const toMaps = h('button', { class: 'btn light sm', type: 'button', onclick: () => { window.__itqPendingTexture = shotImg; location.hash = '#/tool/tex-maps'; } }, ico('layers', 16), 'تحويل هذه الصورة نفسها إلى خرائط');
+    const grid = h('div', { class: 'rs-grid' }, h('p', { class: 'muted' }, 'جارٍ البحث عن أقرب الخامات بصريًا…'));
+    shotResults.append(h('div', { class: 'note info' }, 'وضع «على جهازك»: يُحلَّل لون الصورة وملمسها على جهازك وتُرتَّب خامات المكتبة حسب قربها منها، دون ذكاء اصطناعي. اختر نوع الخامة لتدقيق النتائج.'),
+      typeChips, h('div', { class: 'rs-row' }, toMaps), grid);
+    try {
+      let cands = await searchMaterials('', { words, limit: 40 });
+      if (cands.length < 8 && typeWord) cands = await searchMaterials('', { words: typeWord.split(' '), limit: 40 });
+      const sigs = await Promise.all(cands.map(thumbSig));
+      const ranked = cands.map((m, i) => ({ m, d: sigs[i] ? dist(sig, sigs[i]) : 1e9 })).sort((a, b) => a.d - b.d).slice(0, 12);
+      grid.innerHTML = '';
+      if (!ranked.length) grid.append(h('p', { class: 'muted' }, 'لا توجد نتائج. اختر نوع الخامة أو استخدم تبويب «البحث في المكتبة».'));
+      ranked.forEach(({ m }) => grid.append(card(m, { category: typeWord ? (CAT_FROM[typeWord] || '') : '' })));
+    } catch (e) { grid.innerHTML = ''; grid.append(h('p', { class: 'note err' }, e.message)); }
+  }
 
   const shotDz = dropzone({ accept: 'image/*', multiple: false, label: 'اختر صورة الشوت', hint: 'صورة ريندر أو صورة واقعية للمشروع (JPG أو PNG)', onFiles: async ([f]) => {
     const url = URL.createObjectURL(f); const img = new Image(); img.src = url; await img.decode();

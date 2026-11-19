@@ -482,3 +482,4 @@ iframe.service-frame { width: 100%; min-height: 75vh; border: 1px solid var(--li
 .tool-ed { padding:4px 12px 12px; border-top:1px solid var(--line) }
 .mini-ic svg { color:#fff }
 @media (max-width:700px) { .cat-row { grid-template-columns:1fr auto; } }
+.rs-chips button.on { background:var(--tool-color); border-color:var(--tool-color); color:#fff }
