@@ -59,6 +59,7 @@ export const BUILTIN_TOOLS = [
   { id: 'rotate', category: 'edit', icon: 'rotate-cw', color: '#7048e8', title: 'تدوير صفحات PDF', desc: 'دوّر جميع الصفحات أو صفحات بعينها بالزاوية التي تريدها.' },
   { id: 'watermark', category: 'edit', icon: 'stamp', color: '#7048e8', title: 'إضافة علامة مائية', desc: 'أضف نصًا أو صورة علامةً مائية على صفحات الملف.' },
   { id: 'page-numbers', category: 'edit', icon: 'list-ordered', color: '#7048e8', title: 'ترقيم صفحات PDF', desc: 'أضف أرقام الصفحات بالموضع والتنسيق اللذين تفضلهما.' },
+  { id: 'remove-watermark', category: 'edit', icon: 'eraser', color: '#7048e8', badge: 'جديد', title: 'إزالة العلامة المائية والعناصر المكررة', desc: 'احذف العلامات المائية والأختام والشعارات والنصوص المكررة من كل صفحات PDF، أو غطِّ منطقة ثابتة، أو نظّف الصفحات الممسوحة ضوئيًا بالتفتيح أو بالذكاء الاصطناعي.' },
   { id: 'sign', category: 'edit', icon: 'pen-tool', color: '#7048e8', title: 'توقيع ملف PDF', desc: 'ارسم توقيعك أو ارفع صورته وضعه على الصفحات المطلوبة.' },
 
   { id: 'qr', category: 'codes', icon: 'qr-code', color: '#0f766e', title: 'مولّد رمز QR الدائم', desc: 'أنشئ رموز QR ثابتة تعمل مدى الحياة مجانًا، دون اشتراك ودون انتهاء صلاحية.' },

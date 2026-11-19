@@ -214,6 +214,7 @@ async function renderTool(id) {
       const file = { 'mat-studio': ['materials', 'renderMaterials'], lighting: ['lighting', 'renderLighting'], 'tex-maps': ['texmaps', 'renderTexMaps'] }[id];
       const m = await import(`./render/${file[0]}.js`); body.innerHTML = ''; m[file[1]](body);
     }
+    else if (id === 'remove-watermark') { const m = await import('./pdfclean/ui.js'); body.innerHTML = ''; m.renderWatermark(body); }
     else if (id === 'omr') { const m = await import('./omr/omr.js'); body.innerHTML = ''; m.renderOmr(body, t); }
     else if (id === 'feasibility') { const m = await import('./feasibility.js'); body.innerHTML = ''; m.renderFeasibility(body, t, CONFIG); }
     else { const m = await import('./pdf-tools.js'); body.innerHTML = ''; m.renderPdfTool(id, body, t); }
