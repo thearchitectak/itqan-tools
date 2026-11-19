@@ -52,6 +52,23 @@ const TASKS = {
 أعد JSON بهذه البنية:
 {"rtl": true, "blocks": [{"type": "heading", "text": ""}, {"type": "paragraph", "text": ""}, {"type": "list", "items": [""]}, {"type": "table", "rows": [["", ""]]}]}`,
   },
+  shot: {
+    maxTokens: 5000,
+    valid: () => true,
+    prompt: () => `[SHOT]
+الصورة لقطة إظهار معماري (ريندر أو صورة فوتوغرافية) لمشروع داخلي أو خارجي. حلّلها بعين مهندس إظهار محترف:
+١) نوع اللقطة: "interior" أو "exterior"، ووقتها: "day" أو "sunset" أو "night" أو "overcast"، ووصف قصير لطبيعة الإضاءة فيها.
+٢) الخامات الظاهرة على الأسطح الرئيسية (من 3 إلى 12 خامة)، ولكل خامة:
+- name_ar: اسم الخامة بالعربية الفصحى (مثل: رخام كرارا أبيض مصقول).
+- where_ar: موضعها في اللقطة (مثل: الأرضية، الحائط الخلفي، الكنبة).
+- category: واحدة فقط من: wood, floor_wood, marble, stone, concrete, plaster, paint, brick, tiles, ceramic, terrazzo, metal, fabric, leather, carpet, wallpaper, glass, plastic, asphalt, ground, grass, gravel, sand, roofing, other.
+- keywords: من 3 إلى 6 كلمات إنجليزية للبحث في مكتبات الخامات (مثل: white marble polished veined).
+- color: اللون الغالب بالإنجليزية، finish: "matte" أو "satin" أو "glossy"، metal: true أو false.
+- tile_m: الطول التقريبي بالمتر لوحدة النقشة المتكررة إن أمكن تقديره (مثل حجم البلاطة أو عرض لوح الخشب)، وإلا null.
+٣) hdri_keywords: كلمات إنجليزية تصف خريطة HDRI مناسبة لإضاءة اللقطة (مثل: clear sky midday, sunset warm, overcast soft, indoor studio).
+أعد JSON بهذه البنية تمامًا:
+{"shot": {"type": "interior", "time": "day", "lighting_ar": "", "hdri_keywords": [""]}, "materials": [{"name_ar": "", "where_ar": "", "category": "marble", "keywords": [""], "color": "", "finish": "glossy", "metal": false, "tile_m": null}]}`,
+  },
   table: {
     maxTokens: 8000,
     valid: () => true,

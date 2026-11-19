@@ -123,3 +123,14 @@ export async function textToPng(text, { size = 48, color = '#000000', weight = 7
   const blob = await new Promise(r => c.toBlob(r, 'image/png'));
   return { bytes: new Uint8Array(await blob.arrayBuffer()), width: w / scale, height: hgt / scale };
 }
+
+// أيقونة من مكتبة Lucide باسمها، أو SVG محفوظ من لوحة التحكم (يُنظَّف من أي سكربت)
+export function iconMarkup(name, svg, size = 24) {
+  if (svg && /^<svg[\s>]/i.test(svg)) {
+    const clean = svg.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+="[^"]*"/gi, '');
+    return clean.replace(/width="[^"]*"/, `width="${size}"`).replace(/height="[^"]*"/, `height="${size}"`);
+  }
+  return icon(name, size);
+}
+// صورة مرفوعة من لوحة التحكم (data URL أو https فقط)
+export const safeImg = (src) => (/^(data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,|https:\/\/)/i.test(src || '') ? src : '');

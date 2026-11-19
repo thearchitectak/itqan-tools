@@ -1,7 +1,7 @@
-import { h, $, $$, ico, toast, download, field } from './ui.js';
+import { h, $, $$, ico, toast, download, field, iconMarkup, safeImg } from './ui.js';
 import { ICONS, icon } from './icons.js';
 import { BRANDS, BRAND_ORDER } from './brands.js';
-import { BUILTIN_TOOLS, CATEGORIES, DEFAULT_CONFIG, DEFAULT_FEASIBILITY_SECTIONS, DEFAULT_MODELS, MODE_IDS, MODE_INFO, mergeConfig, deepMerge } from './defaults.js';
+import { BUILTIN_TOOLS, CATEGORIES, GROUPS, getCategories, getGroups, DEFAULT_CONFIG, DEFAULT_FEASIBILITY_SECTIONS, DEFAULT_MODELS, MODE_IDS, MODE_INFO, mergeConfig, deepMerge } from './defaults.js';
 
 const root = $('#admin');
 let cfg, envS, usage, dirty = false, tab = 'overview';
@@ -50,14 +50,14 @@ const ta = (rows = 4) => h('textarea', { class: 'input', rows });
 const sw = (checked, on) => { const i = h('input', { type: 'checkbox', checked }); i.onchange = () => { on(i.checked); markDirty(); }; return h('label', { class: 'switch' }, i, h('span')); };
 const sel = (opts, v) => h('select', { class: 'input' }, opts.map(([a, b]) => h('option', { value: a, selected: a === v }, b)));
 
-const TABS = [['overview', 'نظرة عامة', 'gauge'], ['site', 'هوية الموقع', 'globe'], ['profile', 'الملف التعريفي والدعم', 'hand-heart'], ['tools', 'الأدوات المدمجة', 'layout-grid'], ['services', 'الخدمات الإضافية', 'plus'], ['eng', 'الأدوات الهندسية', 'hard-hat'], ['aitools', 'الذكاء الاصطناعي في الأدوات', 'wand-sparkles'], ['feas', 'دراسة الجدوى', 'sparkles'], ['backup', 'النسخ الاحتياطي', 'save']];
+const TABS = [['overview', 'نظرة عامة', 'gauge'], ['site', 'هوية الموقع', 'globe'], ['design', 'التصميم والصفحة الرئيسية', 'palette'], ['groups', 'المجموعات والأقسام', 'layers'], ['profile', 'الملف التعريفي وطرق الدفع', 'hand-heart'], ['tools', 'الأدوات', 'layout-grid'], ['services', 'الخدمات الإضافية', 'plus'], ['eng', 'الأدوات الهندسية', 'hard-hat'], ['aitools', 'الذكاء الاصطناعي في الأدوات', 'wand-sparkles'], ['feas', 'دراسة الجدوى', 'sparkles'], ['backup', 'النسخ الاحتياطي', 'save']];
 
 function render() {
   root.innerHTML = '';
   const side = h('div', { class: 'side' }, TABS.map(([id, t, ic]) => h('button', { class: id === tab ? 'on' : '', onclick: () => { tab = id; render(); } }, ico(ic, 18), t)),
     h('button', { onclick: async () => { await api('/api/admin/logout', { method: 'POST' }); location.reload(); } }, ico('log-out', 18), 'تسجيل الخروج'));
   const main = h('div');
-  ({ overview, site, profile, tools, services, eng, aitools, feas, backup })[tab](main);
+  ({ overview, site, design, groups, profile, tools, services, eng, aitools, feas, backup })[tab](main);
   const saveBtn = h('button', { class: 'btn' }, ico('save', 18), 'حفظ التغييرات');
   saveBtn.onclick = async () => {
     saveBtn.disabled = true;
@@ -122,7 +122,8 @@ function qrField(a) {
 function photoField(p) {
   const prev = h('div');
   const draw = () => { prev.innerHTML = ''; if (p.photo) prev.append(h('div', { class: 'row' }, h('img', { src: p.photo, style: { width: '72px', height: '72px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #e5e7eb' } }), h('button', { class: 'btn light sm', type: 'button', onclick: () => { p.photo = ''; markDirty(); draw(); } }, ico('trash-2', 14), 'إزالة الصورة'))); };
-  const fi = h('input', { type: 'file', accept: 'image/*', class: 'input' });
+  const fi = h('input', { type: 'file', accept: 'image/*', class: 'hidden' });
+  const pick = h('button', { class: 'btn light sm', type: 'button', onclick: () => fi.click() }, ico('upload', 14), 'رفع صورة');
   fi.onchange = async () => {
     const f = fi.files[0]; if (!f) return;
     try {
@@ -135,7 +136,7 @@ function photoField(p) {
     fi.value = '';
   };
   draw();
-  return h('div', { class: 'field' }, h('span', {}, 'الصورة الشخصية (اختيارية)'), fi, h('small', {}, 'تظهر دائرية فوق الاسم. يُفضّل صورة مربعة ووجهك في منتصفها.'), prev);
+  return h('div', { class: 'field' }, h('span', {}, 'الصورة الشخصية (اختيارية)'), h('div', { class: 'row' }, pick, fi), h('small', {}, 'تظهر دائرية فوق الاسم. يُفضّل صورة مربعة ووجهك في منتصفها.'), prev);
 }
 
 function profile(m) {
@@ -149,51 +150,74 @@ function profile(m) {
     h('div', { class: 'opts' }, h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), p, 'enabled', 'bool'), 'إظهار الملف التعريفي'), field('الاسم كما يظهر', bind(inp(), p, 'name')), photoField(p)),
     h('h3', {}, 'روابط التواصل'), links));
 
-  const accBox = h('div'), linkBox = h('div');
-  const drawAcc = () => {
-    accBox.innerHTML = '';
-    if (!d.accounts.length) accBox.append(h('p', { class: 'muted' }, 'لم تُضف حسابات بعد.'));
-    d.accounts.forEach((a, i) => accBox.append(h('div', { class: 'q-section' },
-      h('div', { class: 'opts', style: { marginTop: 0 } },
-        field('اسم البنك', bind(inp(), a, 'bank')), field('اسم المستفيد', bind(inp(), a, 'holder')),
-        field('رقم الآيبان (IBAN)', bind(inp({ dir: 'ltr' }), a, 'iban')), field('رقم الحساب', bind(inp({ dir: 'ltr' }), a, 'number')),
-        field('الدولة', bind(inp(), a, 'country')), field('ملاحظة (اختيارية)', bind(inp(), a, 'note')),
-        qrField(a)),
-      h('div', { class: 'actions', style: { justifyContent: 'flex-start', marginTop: '10px' } }, h('button', { class: 'btn light sm', onclick: () => { if (confirm('حذف هذا الحساب؟')) { d.accounts.splice(i, 1); markDirty(); drawAcc(); } } }, ico('trash-2', 14), 'حذف الحساب')))));
-  };
-  const drawLinks = () => {
-    linkBox.innerHTML = '';
-    d.links.forEach((l, i) => linkBox.append(h('div', { class: 'list-row', style: { gridTemplateColumns: '1fr 2fr auto' } }, bind(inp({ placeholder: 'نص الزر، مثل: PayPal' }), l, 'label'), bind(inp({ dir: 'ltr', placeholder: 'https://' }), l, 'url'),
-      h('button', { class: 'icon-btn', onclick: () => { d.links.splice(i, 1); markDirty(); drawLinks(); } }, ico('trash-2', 16)))));
-  };
-  drawAcc(); drawLinks();
+  const TYPES = [['bank', 'حساب بنكي'], ['wallet', 'محفظة إلكترونية (STC Pay، فودافون كاش، إنستاباي…)'], ['link', 'رابط دفع (PayPal، Ko-fi…)'], ['other', 'أخرى']];
+  const TEMPLATES = { bank: [['اسم المستفيد', false], ['رقم الآيبان', true], ['رقم الحساب', true]], wallet: [['رقم المحفظة', true], ['اسم صاحب المحفظة', false]], link: [], other: [['البيان', false]] };
+  const methodsBox = listEditor(d.methods, (x, i, redraw) => {
+    x.fields ||= [];
+    const fields = listEditor(x.fields, (f) => h('div', { class: 'opts', style: { margin: 0, gridTemplateColumns: '1fr 1.6fr auto' } }, bind(inp({ placeholder: 'اسم الحقل، مثل: رقم الآيبان' }), f, 'label'), bind(inp({ placeholder: 'القيمة', dir: 'auto' }), f, 'value'), h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), f, 'ltr', 'bool'), 'أرقام/لاتيني')),
+      () => ({ label: '', value: '', ltr: true }), 'إضافة حقل');
+    const type = sel(TYPES, x.type || 'bank'); bind(type, x, 'type');
+    type.addEventListener('change', () => { if (!x.fields.some(f => f.value)) { x.fields = TEMPLATES[x.type].map(([label, ltr]) => ({ label, value: '', ltr })); markDirty(); redraw(); } });
+    return h('div', { class: 'pay-ed' },
+      h('div', { class: 'row' }, h('b', { style: { flex: 1 } }, x.name || 'طريقة دفع'), h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), x, 'enabled', 'bool'), 'ظاهرة')),
+      h('div', { class: 'opts' }, field('النوع', type), field('الاسم الظاهر', bind(inp({ placeholder: 'مثل: مصرف الراجحي، STC Pay، PayPal' }), x, 'name')),
+        imgField(x, 'logo', 'شعار أو صورة الطريقة (اختياري)', { max: 96 }), imgField(x, 'qr', 'صورة رمز QR (اختيارية)', { max: 420, hint: 'قُص صورة الرمز من التطبيق وارفعها' }),
+        field('رابط الدفع (اختياري)', bind(inp({ dir: 'ltr', placeholder: 'https://' }), x, 'url')), field('نص زر الرابط', bind(inp({ placeholder: 'ادعم عبر PayPal' }), x, 'buttonText')),
+        h('div', { class: 'field', style: { gridColumn: '1/-1' } }, h('span', {}, 'ملاحظة (اختيارية)'), bind(inp({ placeholder: 'مثل: للتحويل من داخل السعودية' }), x, 'note'))),
+      h('h4', { style: { margin: '8px 0' } }, 'البيانات (يظهر بجانب كل منها زر نسخ)'), fields);
+  }, () => ({ id: Math.random().toString(36).slice(2, 8), type: 'bank', name: '', logo: '', qr: '', url: '', buttonText: '', note: '', enabled: true, fields: TEMPLATES.bank.map(([label, ltr]) => ({ label, value: '', ltr })) }), 'إضافة طريقة دفع أو حساب');
   m.append(h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'دعم استمرار الأدوات'),
-    h('p', { class: 'muted' }, 'يظهر القسم في الصفحة الرئيسية وصفحة «ادعم المنصة»، ويظهر رابط صغير إليه بعد نجاح أي أداة. لا يظهر شيء حتى تضيف حسابًا أو رابطًا واحدًا على الأقل.'),
-    h('div', { class: 'opts' }, h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), d, 'enabled', 'bool'), 'إظهار قسم الدعم'), field('عنوان القسم', bind(inp(), d, 'title'))),
-    h('div', { class: 'opts', style: { gridTemplateColumns: '1fr' } }, field('نص الدعوة', bind(ta(3), d, 'text')), field('رسالة الشكر (في صفحة الدعم)', bind(inp(), d, 'thanks'))),
-    h('div', { class: 'row', style: { marginTop: '18px' } }, h('h3', { style: { margin: 0 } }, 'الحسابات البنكية'), h('span', { class: 'spacer' }), h('button', { class: 'btn sm', onclick: () => { d.accounts.push({ bank: '', holder: '', iban: '', number: '', country: '', note: '' }); markDirty(); drawAcc(); } }, ico('plus', 14), 'إضافة حساب')),
-    accBox,
-    h('div', { class: 'row', style: { marginTop: '18px' } }, h('h3', { style: { margin: 0 } }, 'روابط دعم أخرى (اختيارية)'), h('span', { class: 'spacer' }), h('button', { class: 'btn light sm', onclick: () => { d.links.push({ label: '', url: '' }); markDirty(); drawLinks(); } }, ico('plus', 14), 'إضافة رابط')),
-    linkBox));
+    h('p', { class: 'muted' }, 'يظهر القسم في الصفحة الرئيسية وصفحة «ادعم المنصة»، ويظهر رابط صغير إليه بعد نجاح أي أداة. لا يظهر شيء حتى تضيف طريقة دفع ظاهرة واحدة على الأقل.'),
+    h('div', { class: 'opts' }, h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), d, 'enabled', 'bool'), 'إظهار قسم الدعم'), field('عنوان القسم', bind(inp(), d, 'title')), field('نص زر الدعم', bind(inp({ placeholder: 'ادعم الآن' }), d, 'buttonText')), field('عنوان نافذة طرق الدفع', bind(inp({ placeholder: 'طرق الدعم' }), d, 'detailsTitle'))),
+    h('div', { class: 'opts', style: { gridTemplateColumns: '1fr' } }, field('نص الدعوة', bind(ta(3), d, 'text')), field('رسالة الشكر (في نافذة الدعم)', bind(inp(), d, 'thanks'))),
+    h('h3', { style: { marginTop: '18px' } }, 'طرق الدفع والحسابات'), methodsBox));
 }
 
 function tools(m) {
+  const cats = getCategories(cfg), G = getGroups(cfg);
+  const catOpts = cats.map(c => [c.id, (G.find(g => g.cats.includes(c.id))?.title ? G.find(g => g.cats.includes(c.id)).title + ' ← ' : '') + ((cfg.categories.find(x => x.id === c.id) || c).title)]);
   const list = BUILTIN_TOOLS.map((t, i) => ({ t, o: cfg.tools[t.id] ||= {}, order: Number.isFinite(cfg.tools[t.id]?.order) ? cfg.tools[t.id].order : i })).sort((a, b) => a.order - b.order);
   list.forEach((x, i) => x.o.order = i);
+  const q = inp({ type: 'search', placeholder: 'ابحث عن أداة…' });
   const box = h('div');
+  let openId = null;
   const draw = () => {
     box.innerHTML = '';
+    const term = q.value.trim();
     list.forEach((x, i) => {
-      const title = inp({ placeholder: x.t.title }); title.value = x.o.title || ''; title.oninput = () => { x.o.title = title.value.trim() || undefined; markDirty(); };
-      const desc = inp({ placeholder: x.t.desc }); desc.value = x.o.desc || ''; desc.oninput = () => { x.o.desc = desc.value.trim() || undefined; markDirty(); };
-      const badge = inp({ placeholder: 'شارة (مثل: جديد)' }); badge.value = x.o.badge || ''; badge.oninput = () => { x.o.badge = badge.value; markDirty(); };
+      const T = x.t, o = x.o;
+      if (term && !((o.title || T.title) + ' ' + T.id).includes(term)) return;
+      const colorOf = () => o.color || T.color;
+      const mini = h('span', { class: 'mini-ic', style: { background: colorOf() } });
+      const paintMini = () => { mini.innerHTML = safeImg(o.image) ? `<img src="${o.image}" style="width:100%;height:100%;object-fit:contain">` : iconMarkup(o.icon || T.icon, o.iconSvg, 16); mini.style.background = safeImg(o.image) ? 'transparent' : colorOf(); };
+      paintMini();
       const move = (d) => { const j = i + d; if (j < 0 || j >= list.length) return; [list[i], list[j]] = [list[j], list[i]]; list.forEach((y, k) => y.o.order = k); markDirty(); draw(); };
-      box.append(h('div', { class: 'list-row' }, h('span', { class: 'mini-ic', style: { background: x.t.color }, html: icon(x.t.icon, 16) }), title, desc, badge,
-        h('div', { class: 'row', style: { flexWrap: 'nowrap' } }, h('button', { class: 'icon-btn', title: 'أعلى', disabled: i === 0, onclick: () => move(-1) }, ico('arrow-up', 16)), h('button', { class: 'icon-btn', title: 'أسفل', disabled: i === list.length - 1, onclick: () => move(1) }, ico('arrow-down', 16)), sw(x.o.enabled !== false, v => x.o.enabled = v))));
+      const editBtn = h('button', { class: 'btn light sm', type: 'button', onclick: () => { openId = openId === T.id ? null : T.id; draw(); } }, openId === T.id ? 'إغلاق' : 'تعديل');
+      const row = h('div', { class: 'tool-row' + (openId === T.id ? ' open' : '') },
+        h('div', { class: 'tool-row-head' }, mini, h('b', { style: { flex: 1 } }, o.title || T.title), h('span', { class: 'muted', style: { fontSize: '12px' } }, (cats.find(c => c.id === (o.category || T.category)) || {}).title || ''),
+          h('button', { class: 'icon-btn', type: 'button', title: 'أعلى', disabled: i === 0 || !!term, onclick: () => move(-1) }, ico('arrow-up', 16)), h('button', { class: 'icon-btn', type: 'button', title: 'أسفل', disabled: i === list.length - 1 || !!term, onclick: () => move(1) }, ico('arrow-down', 16)),
+          sw(o.enabled !== false, v => o.enabled = v), editBtn));
+      if (openId === T.id) {
+        const title = inp({ placeholder: T.title }); title.value = o.title || ''; title.oninput = () => { o.title = title.value.trim() || undefined; markDirty(); };
+        const desc = h('textarea', { class: 'input', rows: 2, placeholder: T.desc }); desc.value = o.desc || ''; desc.oninput = () => { o.desc = desc.value.trim() || undefined; markDirty(); };
+        const badge = inp({ placeholder: 'مثل: جديد (فارغ = دون شارة)' }); badge.value = o.badge ?? T.badge ?? ''; badge.oninput = () => { o.badge = badge.value; markDirty(); };
+        const cat = sel(catOpts, o.category || T.category); cat.onchange = () => { o.category = cat.value === T.category ? undefined : cat.value; markDirty(); };
+        if (!o.icon) o.icon = T.icon;
+        const ip = iconPick(o, 'icon', 'iconSvg', colorOf);
+        const col = inp({ type: 'color', style: { height: '42px', padding: '4px', width: '64px' } }); col.value = o.color || T.color; col.oninput = () => { o.color = col.value; markDirty(); ip.paint(); paintMini(); };
+        row.append(h('div', { class: 'tool-ed' },
+          h('div', { class: 'opts' }, field('الاسم', title), field('الشارة', badge), h('div', { class: 'field', style: { gridColumn: '1/-1' } }, h('span', {}, 'الوصف'), desc),
+            field('القسم (والمجموعة)', cat), h('div', { class: 'field' }, h('span', {}, 'الأيقونة واللون'), h('div', { class: 'row' }, ip.el, col)),
+            imgField(o, 'image', 'صورة بدل الأيقونة (اختيارية)', { max: 128, hint: 'PNG أو SVG مربعة؛ تظهر بدل الأيقونة الملونة', onChange: paintMini })),
+          h('div', { class: 'row' }, h('a', { class: 'btn light sm', href: '/#/tool/' + T.id, target: '_blank' }, ico('external-link', 14), 'فتح الأداة'),
+            h('button', { class: 'btn light sm', type: 'button', onclick: () => { if (confirm('إعادة هذه الأداة إلى إعداداتها الافتراضية؟')) { const ord = o.order; for (const k of Object.keys(o)) delete o[k]; o.order = ord; markDirty(); draw(); } } }, ico('refresh-cw', 14), 'استعادة الافتراضي'))));
+      }
+      box.append(row);
     });
   };
+  q.oninput = draw;
   draw();
-  m.append(h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'الأدوات المدمجة'), h('p', { class: 'muted' }, 'غيّر اسم الأداة ووصفها (اترك الحقل فارغًا لاستخدام النص الافتراضي)، ورتّبها بالأسهم، وأوقفها أو فعّلها بالمفتاح.'), box));
+  m.append(h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'الأدوات'), h('p', { class: 'muted' }, 'لكل أداة: الاسم والوصف والشارة والقسم والأيقونة (من أكثر من 2300 أيقونة أو صورة ترفعها) واللون، مع الترتيب والإظهار والإخفاء. الحقول الفارغة تعني القيمة الافتراضية.'), q, h('div', { style: { height: '10px' } }), box));
 }
 
 function services(m) {
@@ -207,19 +231,18 @@ function services(m) {
   };
   const edit = (s) => {
     editor.innerHTML = '';
-    const iconSel = sel(Object.keys(ICONS).map(k => [k, k]), s.icon || 'zap'); const prev = h('span', { class: 'mini-ic', style: { background: s.color || '#495057', width: '42px', height: '42px' }, html: icon(s.icon || 'zap', 22) });
+    const ipk = iconPick(s, 'icon', 'iconSvg', () => s.color || '#495057');
     const color = inp({ type: 'color', style: { height: '42px', padding: '4px' } });
-    bind(iconSel, s, 'icon'); bind(color, s, 'color');
-    const upd = () => { prev.innerHTML = icon(iconSel.value, 22); prev.style.background = color.value; }; iconSel.addEventListener('change', upd); color.addEventListener('input', upd);
+    bind(color, s, 'color'); color.addEventListener('input', ipk.paint);
     const type = sel([['html', 'صفحة داخل الموقع (HTML/JS)'], ['link', 'رابط خارجي']], s.type || 'html'); bind(type, s, 'type');
     const url = bind(inp({ dir: 'ltr', placeholder: 'https://' }), s, 'url'); const html = bind(h('textarea', { class: 'input', rows: 16, dir: 'ltr', style: { fontFamily: 'monospace', fontSize: '13px' } }), s, 'html');
     const urlF = field('الرابط', url), htmlF = field('كود الصفحة (HTML كامل بما فيه CSS و JavaScript)', html, 'تعمل الصفحة داخل إطار معزول عن الموقع ولوحة التحكم، ويمكنها تنزيل الملفات وفتح النوافذ.');
     const sync = () => { urlF.classList.toggle('hidden', type.value !== 'link'); htmlF.classList.toggle('hidden', type.value === 'link'); }; type.addEventListener('change', sync); sync();
-    const cat = sel(CATEGORIES.map(c => [c.id, c.title]), s.category || 'custom'); bind(cat, s, 'category');
+    const cat = sel(getCategories(cfg).map(c => [c.id, (cfg.categories.find(x => x.id === c.id) || c).title]), s.category || 'custom'); bind(cat, s, 'category');
     const title = bind(inp(), s, 'title'); title.addEventListener('input', draw);
     editor.append(h('div', { class: 'panel' }, h('h3', { style: { marginTop: 0 } }, 'تعديل الخدمة'),
       h('div', { class: 'opts' }, field('العنوان', title), field('الوصف', bind(inp(), s, 'desc')), field('القسم', cat), field('الشارة (اختياري)', bind(inp(), s, 'badge')),
-        h('div', { class: 'field' }, h('span', {}, 'الأيقونة واللون'), h('div', { class: 'row' }, prev, iconSel, color)), field('نوع الخدمة', type)),
+        h('div', { class: 'field' }, h('span', {}, 'الأيقونة واللون'), h('div', { class: 'row' }, ipk.el, color)), field('نوع الخدمة', type), imgField(s, 'image', 'صورة بدل الأيقونة (اختيارية)', { max: 128 })),
       h('div', { class: 'opts', style: { gridTemplateColumns: '1fr' } }, urlF, htmlF),
       h('div', { class: 'actions' }, s.type !== 'link' && s.id ? h('a', { class: 'btn light sm', href: '/#/s/' + s.id, target: '_blank' }, 'معاينة (بعد الحفظ)') : null)));
     editor.scrollIntoView({ behavior: 'smooth' });
@@ -342,6 +365,180 @@ function feas(m) {
       ...modeRows,
       h('div', { class: 'opts' }, field('الطبقة المختارة افتراضيًا للمستخدم', defSel, 'إذا لم تكن متاحة، تُختار أول طبقة متاحة تلقائيًا'))),
     h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'أسئلة النموذج'), h('p', { class: 'muted' }, 'الأسئلة التي يجيب عنها المستخدم قبل إعداد الدراسة. تُرسل جميع الإجابات إلى الذكاء الاصطناعي.'), qBox));
+}
+
+
+/* ======================= أدوات مساعدة للوحة التحكم الشاملة ======================= */
+let ALLI = null;
+const allIcons = () => (ALLI = ALLI || import('./icons-all.js'));
+const ICON_AR = { 'ملف': 'file', 'صورة': 'image', 'قلم': 'pen', 'بيت': 'home', 'منزل': 'house', 'مبنى': 'building', 'هندسة': 'ruler', 'مسطرة': 'ruler', 'حاسبة': 'calculator', 'كتاب': 'book', 'تعليم': 'graduation', 'مدرسة': 'school', 'نجمة': 'star', 'قلب': 'heart', 'مال': 'banknote', 'نقود': 'coins', 'بنك': 'landmark', 'محفظة': 'wallet', 'بطاقة': 'credit-card', 'هاتف': 'phone', 'بريد': 'mail', 'رسالة': 'message', 'مستخدم': 'user', 'إعدادات': 'settings', 'بحث': 'search', 'قفل': 'lock', 'ساعة': 'clock', 'تقويم': 'calendar', 'خريطة': 'map', 'موقع': 'map-pin', 'شمس': 'sun', 'قمر': 'moon', 'مصباح': 'lamp', 'ضوء': 'lightbulb', 'كاميرا': 'camera', 'فيديو': 'video', 'صوت': 'volume', 'موسيقى': 'music', 'رسم': 'chart', 'إحصاء': 'chart', 'تنزيل': 'download', 'رفع': 'upload', 'سحابة': 'cloud', 'رمز': 'qr', 'باركود': 'barcode', 'أدوات': 'wrench', 'مفتاح': 'key', 'سيارة': 'car', 'شجرة': 'tree', 'ماء': 'droplet', 'نار': 'flame', 'لون': 'palette', 'طبقات': 'layers', 'صندوق': 'box', 'مجلد': 'folder', 'لعبة': 'gamepad', 'ذكاء': 'sparkles', 'سهم': 'arrow', 'تحقق': 'check', 'اختبار': 'clipboard-check', 'عمود': 'columns', 'سلم': 'footprints' };
+
+function iconPick(obj, nameKey, svgKey, colorOf) {
+  const prev = h('span', { class: 'mini-ic', style: { width: '42px', height: '42px' } });
+  const paint = () => { prev.innerHTML = iconMarkup(obj[nameKey] || 'zap', obj[svgKey], 22); prev.style.background = colorOf ? colorOf() : 'var(--primary)'; };
+  paint();
+  const btn = h('button', { class: 'btn light sm', type: 'button' }, ico('search', 14), 'اختيار أيقونة');
+  btn.onclick = async () => {
+    const { ALL_ICONS, ICON_TAGS } = await allIcons();
+    const names = Object.keys(ALL_ICONS);
+    const q = h('input', { class: 'input', type: 'search', placeholder: 'ابحث بالعربية أو الإنجليزية: بيت، مال، ruler، book…' });
+    const grid = h('div', { class: 'icon-grid' });
+    const dlg = h('dialog', { class: 'don-dlg icon-dlg' }, h('div', { class: 'don-dlg-body' },
+      h('div', { class: 'row' }, h('h2', { style: { margin: 0, flex: 1, fontSize: '19px' } }, `اختيار أيقونة (${names.length})`), h('button', { class: 'icon-btn', type: 'button', onclick: () => { dlg.close(); dlg.remove(); } }, ico('x', 20))), q, grid));
+    const draw = () => {
+      let t = q.value.trim().toLowerCase();
+      for (const [a, e] of Object.entries(ICON_AR)) if (t.includes(a)) t = t.replace(a, e);
+      const words = t.split(/\s+/).filter(Boolean);
+      const list = (words.length ? names.filter(n => words.every(w => n.includes(w) || (ICON_TAGS[n] || '').includes(w))) : names).slice(0, 240);
+      grid.innerHTML = '';
+      list.forEach(n => { const b = h('button', { type: 'button', title: n, html: ALL_ICONS[n].replace('<svg ', '<svg width="24" height="24" ') }); b.onclick = () => { obj[nameKey] = n; obj[svgKey] = ICONS[n] ? '' : ALL_ICONS[n]; markDirty(); paint(); dlg.close(); dlg.remove(); }; grid.append(b); });
+      if (!list.length) grid.append(h('p', { class: 'muted' }, 'لا توجد نتائج.'));
+    };
+    let tm; q.oninput = () => { clearTimeout(tm); tm = setTimeout(draw, 150); };
+    document.body.append(dlg); dlg.showModal(); draw(); q.focus();
+  };
+  return { el: h('div', { class: 'row', style: { gap: '8px' } }, prev, btn), paint };
+}
+
+// رفع صورة صغيرة وحفظها داخل الإعدادات (تُصغَّر تلقائيًا)
+function imgField(obj, key, label, { max = 128, hint, fmt = 'image/png', onChange } = {}) {
+  const prev = h('div', { class: 'row' });
+  const draw = () => { prev.innerHTML = ''; if (obj[key]) prev.append(h('img', { src: obj[key], style: { width: '56px', height: '56px', objectFit: 'contain', border: '1px solid var(--line)', borderRadius: '10px', background: '#fff' } }), h('button', { class: 'btn light sm', type: 'button', onclick: () => { obj[key] = ''; markDirty(); draw(); onChange?.(); } }, ico('trash-2', 14), 'إزالة')); };
+  const fi = h('input', { type: 'file', accept: 'image/*', class: 'hidden' });
+  const pick = h('button', { class: 'btn light sm', type: 'button', onclick: () => fi.click() }, ico('upload', 14), 'رفع صورة');
+  fi.onchange = async () => {
+    const f = fi.files[0]; if (!f) return;
+    try {
+      if (f.type === 'image/svg+xml' && f.size < 60000) { const t = await f.text(); obj[key] = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(t.replace(/<script[\s\S]*?<\/script>/gi, '')))); }
+      else {
+        const bmp = await createImageBitmap(f); const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+        const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+        const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, c.width, c.height);
+        obj[key] = c.toDataURL(fmt, 0.9);
+      }
+      markDirty(); draw(); onChange?.();
+    } catch { toast('تعذّرت قراءة الصورة.', true); }
+    fi.value = '';
+  };
+  draw();
+  return h('div', { class: 'field' }, h('span', {}, label), h('div', { class: 'row' }, pick, fi), hint ? h('small', {}, hint) : null, prev);
+}
+
+// قائمة قابلة للترتيب والحذف والإضافة
+function listEditor(arr, rowFn, makeNew, addLabel) {
+  const box = h('div', { class: 'le' });
+  const draw = () => {
+    box.innerHTML = '';
+    arr.forEach((it, i) => {
+      const mv = (d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; markDirty(); draw(); };
+      box.append(h('div', { class: 'le-row' }, h('div', { class: 'le-main' }, rowFn(it, i, draw)),
+        h('div', { class: 'le-ctl' }, h('button', { class: 'icon-btn', type: 'button', title: 'أعلى', disabled: i === 0, onclick: () => mv(-1) }, ico('arrow-up', 16)), h('button', { class: 'icon-btn', type: 'button', title: 'أسفل', disabled: i === arr.length - 1, onclick: () => mv(1) }, ico('arrow-down', 16)),
+          h('button', { class: 'icon-btn', type: 'button', title: 'حذف', onclick: () => { if (confirm('حذف هذا العنصر؟')) { arr.splice(i, 1); markDirty(); draw(); } } }, ico('trash-2', 16)))));
+    });
+    if (!arr.length) box.append(h('p', { class: 'muted' }, 'لا توجد عناصر.'));
+    box.append(h('button', { class: 'btn light sm', type: 'button', onclick: () => { arr.push(makeNew()); markDirty(); draw(); } }, ico('plus', 14), addLabel || 'إضافة'));
+  };
+  draw();
+  return box;
+}
+const colorInp = (obj, key) => bind(inp({ type: 'color', style: { height: '42px', padding: '4px', width: '64px' } }), obj, key);
+
+/* ======================= تبويب التصميم والصفحة الرئيسية ======================= */
+function design(m) {
+  const t = cfg.theme, H = cfg.home, N = cfg.nav, F = cfg.footer, s = cfg.site;
+  const FONT_OPTS = [['Cairo', 'Cairo (الافتراضي)'], ['Tajawal', 'Tajawal'], ['Almarai', 'Almarai'], ['IBM Plex Sans Arabic', 'IBM Plex Sans Arabic'], ['Readex Pro', 'Readex Pro'], ['Noto Kufi Arabic', 'Noto Kufi Arabic'], ['El Messiri', 'El Messiri'], ['system', 'خط النظام']];
+  const logo = iconPick(t, 'logoIcon', 'logoIconSvg', () => s.primaryColor);
+  m.append(
+    h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'الألوان والخط'),
+      h('div', { class: 'opts' },
+        field('الخط', bind(sel(FONT_OPTS, t.font), t, 'font'), 'الخطوط غير Cairo تُحمَّل من Google Fonts'),
+        field('استدارة الزوايا (بكسل)', bind(inp({ type: 'number', min: 0, max: 30 }), t, 'radius', 'num')),
+        field('الوضع الليلي', bind(sel([['off', 'متوقف'], ['auto', 'تلقائي حسب جهاز الزائر'], ['on', 'دائمًا']], t.dark), t, 'dark')),
+        field('اللون الأساسي', colorInp(s, 'primaryColor')), field('اللون الثانوي (الشارات والإعلانات)', colorInp(s, 'accentColor')),
+        field('خلفية الصفحة', colorInp(t, 'bg')), field('خلفية البطاقات', colorInp(t, 'card')), field('لون النصوص', colorInp(t, 'ink')),
+        field('خلفية الشريط العلوي', colorInp(t, 'headerBg')), field('خلفية التذييل', colorInp(t, 'footerBg')), field('نصوص التذييل', colorInp(t, 'footerInk')))),
+    h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'الشعار والأيقونة'),
+      h('div', { class: 'opts' },
+        h('div', { class: 'field' }, h('span', {}, 'أيقونة الشعار'), logo.el, h('small', {}, 'تظهر بجوار اسم الموقع إن لم ترفع صورة شعار')),
+        imgField(t, 'logoImage', 'صورة الشعار (اختيارية)', { max: 160, hint: 'PNG أو SVG بخلفية شفافة؛ تحل محل الأيقونة' }),
+        imgField(t, 'favicon', 'أيقونة المتصفح (Favicon)', { max: 64, hint: 'مربعة، وتظهر في تبويب المتصفح' }))),
+    h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'الصفحة الرئيسية'),
+      h('div', { class: 'opts' },
+        field('العنوان الكبير', bind(inp({ placeholder: s.name }), H, 'heroTitle'), 'فارغ = اسم الموقع'),
+        field('النص تحت العنوان', bind(inp({ placeholder: s.tagline }), H, 'heroText'), 'فارغ = الشعار النصي من «هوية الموقع»'),
+        field('نص مربع البحث', bind(inp(), H, 'searchPlaceholder')),
+        field('حالة المجموعات عند أول زيارة', bind(sel([['closed', 'مطوية كلها'], ['first', 'فتح المجموعة الأولى'], ['open', 'مفتوحة كلها']], H.groupsDefault), H, 'groupsDefault')),
+        h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), H, 'showSearch', 'bool'), 'إظهار مربع البحث'),
+        h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), H, 'showJump', 'bool'), 'إظهار أزرار المجموعات السريعة'),
+        h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), H, 'showGroupControls', 'bool'), 'إظهار «فتح الكل / طي الكل»'),
+        h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), H, 'showProfile', 'bool'), 'إظهار الملف التعريفي'),
+        h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), H, 'showDonation', 'bool'), 'إظهار قسم الدعم')),
+      h('h3', {}, 'الشارات تحت العنوان'),
+      listEditor(H.badges, (b) => { const ip = iconPick(b, 'icon', 'iconSvg'); return h('div', { class: 'row' }, ip.el, h('div', { style: { flex: 1 } }, bind(inp({ placeholder: 'نص الشارة' }), b, 'text'))); }, () => ({ icon: 'check', text: '' }), 'إضافة شارة')),
+    h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'القائمة العلوية'),
+      h('div', { class: 'opts' },
+        field('طريقة بناء القائمة', bind(sel([['auto', 'تلقائية من المجموعات'], ['custom', 'عناصر أحددها بنفسي']], N.mode), N, 'mode')),
+        h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), N, 'showSupport', 'bool'), 'إضافة «ادعم المنصة» تلقائيًا')),
+      h('p', { class: 'muted' }, 'في الوضع المخصص: الروابط الداخلية تبدأ بـ #/ مثل #/tool/omr أو #/?g=eng، والخارجية بـ https://'),
+      listEditor(N.items, (x) => h('div', { class: 'opts', style: { margin: 0 } }, bind(inp({ placeholder: 'النص' }), x, 'label'), bind(inp({ placeholder: '#/tool/qr أو https://', dir: 'ltr' }), x, 'href'),
+        h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), x, 'newTab', 'bool'), 'في نافذة جديدة'), h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), x, 'enabled', 'bool'), 'ظاهر')),
+        () => ({ label: '', href: '', newTab: false, enabled: true }), 'إضافة عنصر')),
+    h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'روابط التذييل'),
+      listEditor(F.links, (x) => h('div', { class: 'opts', style: { margin: 0 } }, bind(inp({ placeholder: 'النص' }), x, 'label'), bind(inp({ placeholder: '#/privacy أو https://', dir: 'ltr' }), x, 'href')), () => ({ label: '', href: '' }), 'إضافة رابط')),
+    h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'CSS مخصص (للمتقدمين)'),
+      h('p', { class: 'muted' }, 'أي تنسيق تكتبه هنا يُطبَّق على الموقع كله بعد الحفظ. مثال: .tool-card h3 { font-size: 18px }'),
+      bind(h('textarea', { class: 'input', rows: 8, dir: 'ltr', style: { fontFamily: 'monospace', fontSize: '13px' } }), t, 'customCss')),
+    h('div', { class: 'actions' }, h('button', { class: 'btn light sm', type: 'button', onclick: () => { if (!confirm('استعادة التصميم الافتراضي (الألوان والخط والشعار والصفحة الرئيسية والقوائم)؟')) return; cfg.theme = structuredClone(DEFAULT_CONFIG.theme); cfg.home = structuredClone(DEFAULT_CONFIG.home); cfg.nav = structuredClone(DEFAULT_CONFIG.nav); cfg.footer = structuredClone(DEFAULT_CONFIG.footer); markDirty(); render(); } }, ico('refresh-cw', 14), 'استعادة التصميم الافتراضي')));
+}
+
+/* ======================= تبويب المجموعات والأقسام ======================= */
+function groups(m) {
+  if (!cfg.groups.length) cfg.groups = structuredClone(GROUPS).map(g => ({ ...g, enabled: true }));
+  const cats = getCategories(cfg);
+  const catTitle = (id) => (cfg.categories.find(c => c.id === id) || cats.find(c => c.id === id) || { title: id }).title;
+  const setCatTitle = (id, title) => { let c = cfg.categories.find(x => x.id === id); if (!c) { c = { id }; cfg.categories.push(c); } c.title = title; markDirty(); };
+  const box = h('div');
+  const draw = () => {
+    box.innerHTML = '';
+    // الأقسام غير المسندة إلى أي مجموعة
+    const used = new Set(cfg.groups.flatMap(g => g.cats));
+    const orphan = cats.filter(c => !used.has(c.id));
+    cfg.groups.forEach((g, gi) => {
+      g.cats ||= [];
+      const ip = iconPick(g, 'icon', 'iconSvg', () => g.color);
+      const color = colorInp(g, 'color'); color.addEventListener('input', ip.paint);
+      const mvG = (d) => { const j = gi + d; if (j < 0 || j >= cfg.groups.length) return; [cfg.groups[gi], cfg.groups[j]] = [cfg.groups[j], cfg.groups[gi]]; markDirty(); draw(); };
+      const catRows = h('div', { class: 'cat-list' });
+      g.cats.forEach((cid, ci) => {
+        const ttl = inp({ value: catTitle(cid) }); ttl.oninput = () => setCatTitle(cid, ttl.value);
+        const move = sel([['', 'نقل إلى…'], ...cfg.groups.filter(x => x !== g).map(x => [x.id, x.title])], '');
+        move.onchange = () => { const to = cfg.groups.find(x => x.id === move.value); if (!to) return; g.cats.splice(ci, 1); to.cats.push(cid); markDirty(); draw(); };
+        const mvC = (d) => { const j = ci + d; if (j < 0 || j >= g.cats.length) return; [g.cats[ci], g.cats[j]] = [g.cats[j], g.cats[ci]]; markDirty(); draw(); };
+        const nTools = BUILTIN_TOOLS.filter(t => (cfg.tools[t.id]?.category || t.category) === cid).length + cfg.customServices.filter(s => s.category === cid).length;
+        catRows.append(h('div', { class: 'cat-row' }, ttl, h('span', { class: 'muted', style: { whiteSpace: 'nowrap' } }, `${nTools} أداة`), move,
+          h('button', { class: 'icon-btn', type: 'button', disabled: ci === 0, onclick: () => mvC(-1) }, ico('arrow-up', 16)), h('button', { class: 'icon-btn', type: 'button', disabled: ci === g.cats.length - 1, onclick: () => mvC(1) }, ico('arrow-down', 16)),
+          h('button', { class: 'icon-btn', type: 'button', title: 'إزالة القسم من المجموعة', onclick: () => { g.cats.splice(ci, 1); markDirty(); draw(); } }, ico('x', 16))));
+      });
+      const addCat = h('button', { class: 'btn light sm', type: 'button' }, ico('plus', 14), 'قسم جديد');
+      addCat.onclick = () => { const title = prompt('اسم القسم الجديد:'); if (!title) return; const id = 'c_' + Math.random().toString(36).slice(2, 8); cfg.categories.push({ id, title }); g.cats.push(id); markDirty(); draw(); };
+      const addOrphan = orphan.length ? sel([['', 'إضافة قسم موجود…'], ...orphan.map(c => [c.id, catTitle(c.id)])], '') : null;
+      if (addOrphan) addOrphan.onchange = () => { if (addOrphan.value) { g.cats.push(addOrphan.value); markDirty(); draw(); } };
+      box.append(h('div', { class: 'panel grp-ed', style: { borderInlineStart: `5px solid ${g.color}` } },
+        h('div', { class: 'row' }, h('b', { style: { flex: 1, fontSize: '17px' } }, g.title || '(بدون اسم)'),
+          h('button', { class: 'icon-btn', type: 'button', disabled: gi === 0, onclick: () => mvG(-1) }, ico('arrow-up', 16)), h('button', { class: 'icon-btn', type: 'button', disabled: gi === cfg.groups.length - 1, onclick: () => mvG(1) }, ico('arrow-down', 16)),
+          sw(g.enabled !== false, v => { g.enabled = v; }),
+          h('button', { class: 'icon-btn', type: 'button', title: 'حذف المجموعة', onclick: () => { if (confirm('حذف المجموعة؟ أقسامها ستظهر تحت «خدمات إضافية» أو آخر مجموعة.')) { cfg.groups.splice(gi, 1); markDirty(); draw(); } } }, ico('trash-2', 16))),
+        h('div', { class: 'opts' }, field('اسم المجموعة', bind(inp(), g, 'title')), field('الوصف', bind(inp(), g, 'desc')),
+          h('div', { class: 'field' }, h('span', {}, 'الأيقونة واللون'), h('div', { class: 'row' }, ip.el, color)),
+          imgField(g, 'image', 'صورة بدل الأيقونة (اختيارية)', { max: 128 })),
+        h('h4', { style: { margin: '10px 0 6px' } }, 'الأقسام داخل المجموعة'), catRows, h('div', { class: 'row', style: { marginTop: '8px' } }, addCat, addOrphan)));
+    });
+    box.append(h('div', { class: 'actions' },
+      h('button', { class: 'btn sm', type: 'button', onclick: () => { cfg.groups.push({ id: 'g_' + Math.random().toString(36).slice(2, 8), title: 'مجموعة جديدة', desc: '', icon: 'folder', color: '#475569', cats: [], enabled: true }); markDirty(); draw(); } }, ico('plus', 14), 'إضافة مجموعة'),
+      h('button', { class: 'btn light sm', type: 'button', onclick: () => { if (confirm('استعادة المجموعات والأقسام الافتراضية؟')) { cfg.groups = []; cfg.categories = []; markDirty(); render(); } } }, ico('refresh-cw', 14), 'استعادة الافتراضي')));
+  };
+  draw();
+  m.append(h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'المجموعات والأقسام'), h('p', { class: 'muted' }, 'المجموعات هي القوائم الكبرى القابلة للطي في الصفحة الرئيسية، وتحت كل مجموعة أقسامها. غيّر الأسماء والأيقونات والألوان والترتيب، وانقل الأقسام بين المجموعات، أو أضف مجموعات وأقسامًا جديدة. ولنقل أداة إلى قسم آخر استخدم تبويب «الأدوات».')), box);
 }
 
 function backup(m) {

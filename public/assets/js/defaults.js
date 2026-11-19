@@ -9,6 +9,7 @@ export const CATEGORIES = [
   { id: 'exams', title: 'الاختبارات والتصحيح' },
   { id: 'civil', title: 'الحاسبات الإنشائية والكميات' },
   { id: 'arch', title: 'أدوات المعماري' },
+  { id: 'render', title: 'استوديو الريندر (Corona و V-Ray)' },
   { id: 'survey', title: 'المساحة والمخططات' },
   { id: 'business', title: 'الأعمال والذكاء الاصطناعي' },
   { id: 'custom', title: 'خدمات إضافية' },
@@ -20,11 +21,25 @@ export const CATEGORIES = [
 export const GROUPS = [
   { id: 'general', title: 'الأدوات العامة', icon: 'layers', color: '#e5322d', desc: 'تنظيم ملفات PDF وتحويلها وتحريرها، وإنشاء رموز QR والباركود.', cats: ['organize', 'convert', 'edit', 'codes'] },
   { id: 'edu', title: 'الأدوات التعليمية', icon: 'graduation-cap', color: '#2456a6', desc: 'أدوات المعلم: تصحيح الاختبارات ورصد الدرجات.', cats: ['exams'] },
-  { id: 'eng', title: 'الأدوات الهندسية', icon: 'hard-hat', color: '#b45309', desc: 'حاسبات إنشائية وكميات، وأدوات المعماري، والمساحة والمخططات، مع اختيار الكود.', cats: ['civil', 'arch', 'survey'] },
+  { id: 'eng', title: 'الأدوات الهندسية', icon: 'hard-hat', color: '#b45309', desc: 'حاسبات إنشائية وكميات، وأدوات المعماري واستوديو الريندر، والمساحة والمخططات، مع اختيار الكود.', cats: ['civil', 'arch', 'render', 'survey'] },
   { id: 'business', title: 'الأعمال والمشاريع', icon: 'briefcase', color: '#c2255c', desc: 'دراسات الجدوى والتخطيط المالي للمشروعات.', cats: ['business'] },
   { id: 'more', title: 'خدمات إضافية', icon: 'sparkles', color: '#495057', desc: 'خدمات وروابط مختارة.', cats: ['custom'] },
 ];
-export const groupOf = (cat) => (GROUPS.find(g => g.cats.includes(cat)) || GROUPS[GROUPS.length - 1]).id;
+// المجموعات والأقسام بعد تطبيق تعديلات المالك من لوحة التحكم
+export function getGroups(cfg) {
+  const list = Array.isArray(cfg?.groups) && cfg.groups.length ? cfg.groups : GROUPS;
+  return list.filter(g => g && g.id && g.enabled !== false).map(g => ({ ...g, cats: Array.isArray(g.cats) ? g.cats : [] }));
+}
+export function getCategories(cfg) {
+  const out = CATEGORIES.map(c => ({ ...c }));
+  for (const c of (Array.isArray(cfg?.categories) ? cfg.categories : [])) {
+    if (!c || !c.id) continue;
+    const ex = out.find(x => x.id === c.id);
+    if (ex) Object.assign(ex, c); else out.push({ ...c, custom: true });
+  }
+  return out;
+}
+export const groupOf = (cat, groups = GROUPS) => (groups.find(g => g.cats.includes(cat)) || groups.find(g => g.id === 'more') || groups[groups.length - 1] || { id: 'more' }).id;
 
 export const BUILTIN_TOOLS = [
   { id: 'merge', category: 'organize', icon: 'combine', color: '#e5322d', title: 'دمج ملفات PDF', desc: 'اجمع عدة ملفات PDF في ملف واحد بالترتيب الذي تختاره.' },
@@ -62,6 +77,10 @@ export const BUILTIN_TOOLS = [
   { id: 'pipes', category: 'civil', icon: 'droplets', color: '#b45309', title: 'تصريف المواسير (مانينج)', desc: 'احسب سعة المواسير وسرعة الجريان عند الامتلاء الكامل والجزئي، أو القطر المطلوب لتصريف معيّن.' },
   { id: 'boq', category: 'civil', icon: 'clipboard-list', color: '#b45309', title: 'جدول الكميات (BOQ)', desc: 'أنشئ جدول كميات بالبنود والوحدات والأسعار، وصدّره إلى Excel بمعادلات حية.' },
   { id: 'build-cost', category: 'civil', icon: 'banknote', color: '#b45309', title: 'التكلفة التقديرية للبناء', desc: 'قدّر تكلفة البناء بالمتر المربع حسب الدولة ومستوى التشطيب وعدد الأدوار.' },
+
+  { id: 'mat-studio', category: 'render', icon: 'palette', color: '#7c3aed', badge: 'جديد', title: 'خامات الريندر من الشوت أو المكتبة', desc: 'ارفع صورة الشوت ليتعرّف على خاماتها ويجلب مطابقاتها بجودة حتى 16K من مكتبات مجانية، مجهّزة لـ Corona و V-Ray بالشرح والسكربت، وتُحفظ في مكتبة خاماتك.' },
+  { id: 'lighting', category: 'render', icon: 'lamp-ceiling', color: '#7c3aed', badge: 'جديد', title: 'الإضاءة وإعدادات الريندر', desc: 'خريطة HDRI مناسبة للقطة، وملفات IES للسبوتات، وسكربت يضبط الإضاءة والريندر في 3ds Max حسب نوع اللقطة.' },
+  { id: 'tex-maps', category: 'render', icon: 'layers', color: '#7c3aed', title: 'تحويل صورة الخامة إلى خرائط', desc: 'حوّل صورة أي خامة إلى خرائط Normal و Roughness و Displacement و AO متكررة دون فواصل، مع الشرح لـ Corona و V-Ray.' },
 
   { id: 'stairs', category: 'arch', icon: 'footprints', color: '#1d4ed8', title: 'حاسبة السلالم', desc: 'احسب عدد الدرجات وارتفاع القائمة وعرض النائمة وطول السلم، وتحقّق منها وفق الكود.' },
   { id: 'ramp-slope', category: 'arch', icon: 'triangle-right', color: '#1d4ed8', title: 'حاسبة الانحدار والمنحدرات', desc: 'حوّل بين النسبة المئوية والزاوية والنسبة، واحسب طول منحدر ذوي الإعاقة وفق الكود.' },
@@ -152,8 +171,10 @@ export const DEFAULT_CONFIG = {
     enabled: true,
     title: 'ادعم استمرار الأدوات المجانية',
     text: 'جميع الأدوات في المنصة مجانية، وستبقى كذلك. إن أفادتك، فمساهمتك مهما كانت تساعد على تغطية تكاليف التشغيل والذكاء الاصطناعي، وتطوير أدوات جديدة.',
-    accounts: [], // { bank, holder, iban, number, country, note }
-    links: [],    // { label, url }
+    // طرق الدفع: { id, type: bank|wallet|link|other, name, logo, qr, fields: [{ label, value, ltr }], url, buttonText, note, enabled }
+    methods: [],
+    accounts: [], // (قديم) يُرحَّل تلقائيًا إلى methods
+    links: [],    // (قديم) يُرحَّل تلقائيًا إلى methods
     thanks: 'شكرًا لدعمك، فبمساهمتك تستمر الأدوات مجانية للجميع.',
   },
   // إعدادات الأدوات الهندسية
@@ -168,6 +189,31 @@ export const DEFAULT_CONFIG = {
   },
   // تخصيصات الأدوات المدمجة: { [id]: { enabled, title, desc, order } }
   tools: {},
+  // التصميم العام للموقع
+  theme: {
+    font: 'Cairo',          // Cairo | Tajawal | Almarai | IBM Plex Sans Arabic | Readex Pro | Noto Kufi Arabic | El Messiri | system
+    radius: 14,
+    bg: '#f6f7f9', card: '#ffffff', ink: '#111827',
+    headerBg: '#ffffff', footerBg: '#111827', footerInk: '#d1d5db',
+    dark: 'off',            // off | auto | on
+    logoIcon: 'layers', logoIconSvg: '', logoImage: '', favicon: '',
+    customCss: '',
+  },
+  // الصفحة الرئيسية
+  home: {
+    heroTitle: '', heroText: '', // فارغ = اسم الموقع وشعاره النصي
+    badges: [{ icon: 'infinity', text: 'مجاني بالكامل' }, { icon: 'shield-check', text: 'ملفاتك لا تغادر جهازك' }, { icon: 'zap', text: 'دون تسجيل أو اشتراك' }],
+    showSearch: true, showJump: true, showGroupControls: true,
+    groupsDefault: 'closed', // closed | open | first
+    showProfile: true, showDonation: true,
+    searchPlaceholder: 'ابحث عن أي أداة…',
+  },
+  // القائمة العلوية: auto = تُبنى من المجموعات تلقائيًا، custom = عناصر يحددها المالك
+  nav: { mode: 'auto', items: [], showSupport: true },
+  footer: { links: [{ label: 'الخصوصية', href: '#/privacy' }, { label: 'عن المنصة', href: '#/about' }, { label: 'ادعم المنصة', href: '#/support' }] },
+  // تعديل المجموعات والأقسام (فارغ = الافتراضي)
+  groups: [],
+  categories: [],
   // خدمات يضيفها المالك من لوحة التحكم
   customServices: [],
   // الذكاء الاصطناعي داخل الأدوات: خيار إضافي بجانب المعالجة على الجهاز
@@ -175,7 +221,8 @@ export const DEFAULT_CONFIG = {
     enabled: true,
     providers: { anthropic: { enabled: true, model: '' }, gemini: { enabled: true, model: '' } },
     autoFallback: true,         // الانتقال إلى المزوّد الآخر تلقائيًا عند تعذّر المختار
-    dailyImagesPerIp: 60,       // عدد الصور (الأوراق أو الصفحات) المسموح به لكل مستخدم يوميًا
+    dailyImagesPerIp: 60,       // عدد الصور (الأوراق أو الصفحات) المسموح به لكل مستخدم يوميًا، وتوليد الخامة يُحسب 3 صور
+    imageModel: '',             // نموذج توليد صور الخامات (فارغ = gemini-2.5-flash-image)
   },
   feasibility: {
     enabled: true,
@@ -225,6 +272,19 @@ export function mergeConfig(saved) {
   if (!Array.isArray(cfg.donation.accounts)) cfg.donation.accounts = [];
   if (!Array.isArray(cfg.donation.links)) cfg.donation.links = [];
   if (!['eg', 'sa', 'intl'].includes(cfg.eng.defaultCode)) cfg.eng.defaultCode = 'sa';
+  for (const k of ['groups', 'categories']) if (!Array.isArray(cfg[k])) cfg[k] = [];
+  if (!Array.isArray(cfg.home.badges)) cfg.home.badges = structuredClone(DEFAULT_CONFIG.home.badges);
+  if (!Array.isArray(cfg.nav.items)) cfg.nav.items = [];
+  if (!Array.isArray(cfg.footer.links)) cfg.footer.links = structuredClone(DEFAULT_CONFIG.footer.links);
+  // ترحيل الحسابات والروابط القديمة إلى نظام طرق الدفع
+  const d = cfg.donation;
+  if (!Array.isArray(d.methods)) d.methods = [];
+  if (!d.methods.length && (d.accounts.length || d.links.length)) {
+    d.accounts.forEach((a, i) => d.methods.push({ id: 'acc' + i, type: 'bank', name: a.bank || 'حساب بنكي', logo: '', qr: a.qr || '', note: [a.country, a.note].filter(Boolean).join(' — '), enabled: true,
+      fields: [['اسم المستفيد', a.holder, false], ['رقم الآيبان', a.iban, true], ['رقم الحساب', a.number, true]].filter(f => f[1]).map(([label, value, ltr]) => ({ label, value, ltr })) }));
+    d.links.forEach((l, i) => l.url && d.methods.push({ id: 'lnk' + i, type: 'link', name: l.label || 'رابط دعم', url: l.url, buttonText: l.label || 'ادعم', logo: '', qr: '', fields: [], note: '', enabled: true }));
+    d.accounts = []; d.links = [];
+  }
   // ترحيل الإعدادات القديمة (مزوّد واحد) إلى نظام الطبقات
   const f = cfg.feasibility;
   if (f.provider && MODE_IDS.includes(f.provider)) {
@@ -240,10 +300,11 @@ export function mergeConfig(saved) {
 export function resolveTools(cfg) {
   const list = BUILTIN_TOOLS.map((t, i) => {
     const o = cfg.tools?.[t.id] || {};
-    return { ...t, builtin: true, enabled: o.enabled !== false, title: o.title || t.title, desc: o.desc || t.desc, order: Number.isFinite(o.order) ? o.order : i, badge: o.badge || t.badge || '' };
+    return { ...t, builtin: true, enabled: o.enabled !== false, title: o.title || t.title, desc: o.desc || t.desc, order: Number.isFinite(o.order) ? o.order : i, badge: o.badge ?? t.badge ?? '',
+      icon: o.icon || t.icon, iconSvg: o.iconSvg || '', image: o.image || '', color: o.color || t.color, category: o.category || t.category };
   });
   (cfg.customServices || []).forEach((s, i) => {
-    list.push({ id: 's-' + s.id, serviceId: s.id, builtin: false, category: s.category || 'custom', icon: s.icon || 'zap', color: s.color || '#495057', title: s.title, desc: s.desc || '', enabled: s.enabled !== false, order: Number.isFinite(s.order) ? s.order : 100 + i, type: s.type, url: s.url, badge: s.badge || '' });
+    list.push({ id: 's-' + s.id, serviceId: s.id, builtin: false, category: s.category || 'custom', icon: s.icon || 'zap', color: s.color || '#495057', title: s.title, desc: s.desc || '', enabled: s.enabled !== false, order: Number.isFinite(s.order) ? s.order : 100 + i, type: s.type, url: s.url, badge: s.badge || '', iconSvg: s.iconSvg || '', image: s.image || '' });
   });
   if (cfg.feasibility?.enabled === false) list.forEach(t => { if (t.id === 'feasibility') t.enabled = false; });
   return list.sort((a, b) => a.order - b.order);
