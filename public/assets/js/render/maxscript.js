@@ -194,7 +194,8 @@ fn itq_sync root force =
 	local libV = materialLibrary()
 	for d in dirs do
 	(
-		local ini = d + "material.ini"
+		local ini = d + "material_info.txt"
+		if not (doesFileExist ini) do ini = d + "material.ini"
 		if doesFileExist ini do
 		(
 			local key = itq_ini ini "key" ""

@@ -30,7 +30,14 @@ export function renderLighting(body) {
   };
   try { const s = JSON.parse(sessionStorage.getItem('itq-shot') || 'null'); if (s) fromShot(s); } catch { }
   const shotDz = dropzone({ accept: 'image/*', label: 'ارفع صورة الشوت للتعرّف عليها', hint: 'اختياري — أو اختر نوع اللقطة يدويًا', onFiles: async ([f]) => {
-    if (!picker.isAi) { shotInfo.innerHTML = ''; shotInfo.append(h('div', { class: 'note info' }, 'وضع «على جهازك» لا يحلّل الصور؛ اختر نوع اللقطة يدويًا من الأزرار، أو اختر طريقة بالذكاء الاصطناعي.')); return; }
+    if (!picker.isAi) {
+      try {
+        const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
+        const g = guessScene(img); setScene(g.scene);
+        shotInfo.innerHTML = ''; shotInfo.append(h('div', { class: 'note info' }, `تقدير على جهازك (دون ذكاء اصطناعي): ${SCENES[g.scene].ar}. ${g.why} هذا تقدير تقريبي من ألوان الصورة وإضاءتها؛ غيّره يدويًا من الأزرار إن لم يكن صحيحًا.`));
+      } catch { shotInfo.innerHTML = ''; shotInfo.append(h('div', { class: 'note err' }, 'تعذّر فتح الصورة.')); }
+      return;
+    }
     shotInfo.innerHTML = ''; shotInfo.append(h('p', { class: 'muted' }, 'جارٍ تحليل اللقطة…'));
     try {
       const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
@@ -120,6 +127,28 @@ export function renderLighting(body) {
       h('div', { class: 'opts' }, h('div', { class: 'field' }, h('span', {}, 'المحرك'), h('label', { class: 'check' }, rC, 'Corona'), h('label', { class: 'check' }, rV, 'V-Ray')), h('label', { class: 'field' }, h('span', {}, 'مقاس الصورة'), resPreset), h('div', { class: 'field' }, h('span', {}, 'الجودة'), qSeg)),
       h('div', { class: 'actions' }, goBtn), status)));
   loadHdris();
+}
+
+// تقدير نوع اللقطة على الجهاز من إحصاءات الألوان والإضاءة (تقريبي)
+function guessScene(img) {
+  const W = 160, H = Math.max(40, Math.round(160 * img.height / img.width));
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', { willReadFrequently: true });
+  x.drawImage(img, 0, 0, W, H); const d = x.getImageData(0, 0, W, H).data;
+  const stat = (y0, y1) => { let r = 0, g = 0, b = 0, n = 0, ed = 0, hi = 0;
+    for (let y = Math.floor(y0 * H); y < Math.floor(y1 * H); y++) for (let k = 0; k < W; k++) { const i = (y * W + k) * 4; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+      const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; if (l > 235) hi++;
+      if (k) { const j = i - 4; ed += Math.abs(l - (0.2126 * d[j] + 0.7152 * d[j + 1] + 0.0722 * d[j + 2])); } }
+    r /= n; g /= n; b /= n; return { r, g, b, l: 0.2126 * r + 0.7152 * g + 0.0722 * b, edge: ed / n, hi: hi / n }; };
+  const all = stat(0, 1), top = stat(0, 0.3), bot = stat(0.6, 1);
+  const skyBlue = top.b > top.r + 8 && top.b >= top.g - 4, skyWarm = top.r > top.b + 25 && top.r >= top.g, smoothTop = top.edge <= all.edge * 0.75 + 1.5;
+  if (all.l < 55) {
+    if (top.b > top.r + 4 && top.l < 70) return { scene: 'exterior_night', why: 'الصورة داكنة وأعلاها سماء زرقاء ليلية.' };
+    return { scene: 'interior_night', why: 'الصورة داكنة وإضاءتها صناعية في الغالب.' };
+  }
+  if (skyWarm && smoothTop && top.l > 90) return { scene: 'exterior_sunset', why: 'أعلى الصورة سماء دافئة برتقالية ناعمة.' };
+  if (skyBlue && smoothTop && top.l > 130) return { scene: 'exterior_day', why: 'أعلى الصورة سماء فاتحة ناعمة.' };
+  if (Math.abs(all.r - all.b) < 8 && all.edge < 4 && bot.l > 150) return { scene: 'studio', why: 'خلفية محايدة متجانسة تشبه الاستوديو.' };
+  return { scene: 'interior_day', why: 'لم تظهر سماء واضحة أعلى الصورة، والإضاءة نهارية.' };
 }
 
 function lightGuide(scene, hdri, ies, rends) {

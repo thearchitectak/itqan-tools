@@ -53,7 +53,7 @@ export async function materialFiles(info, maps) {
   out.push([`${base}Realism_Tips.txt`, txt(tipsText(info))]);
   const ini = ['[material]', `key=${info.key}`, `title=${info.title.replace(/[^\x20-\x7e]/g, '')}`, `source=${info.source.replace(/[^\x20-\x7e]/g, '') || 'user'}`, `url=${info.url}`, `ext=${info.ext}`,
     `category=${info.category}`, `metal=${info.metal ? 1 : 0}`, `displace_cm=${info.displaceCm}`, `size_w_m=${info.sizeW || 0}`, `size_h_m=${info.sizeH || 0}`, `maps=${info.maps.join(',')}`].join('\r\n');
-  out.push([`${base}material.ini`, new Blob([ini + '\r\n'], { type: 'text/plain' })]);
+  out.push([`${base}material_info.txt`, new Blob([ini + '\r\n'], { type: 'text/plain' })]);
   const pv = await previewOf(maps.basecolor); if (pv) out.push([`${base}preview.jpg`, pv]);
   return out;
 }
