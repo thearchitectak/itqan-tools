@@ -15,12 +15,14 @@ export function objectEditor({ bytes, pdf, textByPage }) {
 
   const info = h('div', { class: 'oe-info muted' }, 'اضغط على أي عنصر لتحديده، أو اسحب مستطيلًا حول عدة عناصر. اسحب العنصر المحدد لتحريكه.');
   const pageLbl = h('b', {});
+  const pageSel = h('select', { class: 'input', style: { width: 'auto' }, 'aria-label': 'الانتقال إلى صفحة' }, Array.from({ length: N }, (_, i) => h('option', { value: i }, `الصفحة ${i + 1}`)));
+  pageSel.onchange = () => go(+pageSel.value);
   const stage = h('div', { class: 'oe-stage' });
   const pct = h('input', { class: 'input', type: 'number', value: 100, min: 5, max: 500, style: { width: '84px' }, dir: 'ltr' });
   const btn = (icon, t, fn, cls = 'btn light sm') => h('button', { class: cls, type: 'button', onclick: fn }, ico(icon, 15), t);
   const el = h('div', { class: 'oe' },
     h('div', { class: 'oe-bar' },
-      btn('arrow-right', '', () => go(cur - 1)), pageLbl, btn('arrow-left', '', () => go(cur + 1)),
+      btn('arrow-right', '', () => go(cur - 1)), pageSel, pageLbl, btn('arrow-left', '', () => go(cur + 1)),
       h('span', { class: 'spacer' }),
       seg([['all', 'على كل الصفحات التي يتكرر فيها'], ['page', 'على هذه الصفحة فقط']], scope, v => { scope = v; }),
       h('label', { class: 'check' }, (() => { const c = h('input', { type: 'checkbox' }); c.onchange = () => { showAll = c.checked; paint(); }; return c; })(), 'إظهار حدود كل العناصر')),
@@ -65,7 +67,7 @@ export function objectEditor({ bytes, pdf, textByPage }) {
   /* ---------- العرض ---------- */
   let vp = null, canvas = null, ov = null;
   async function render() {
-    pageLbl.textContent = `الصفحة ${cur + 1} من ${N}`;
+    pageLbl.textContent = `من ${N}`; pageSel.value = cur;
     if (dirty) { const r = await applyObjectEdits(P, bytes, edits, textByPage); resultBytes = r.bytes; resultDoc = await (await libs.pdfjs()).getDocument({ data: resultBytes.slice(), isEvalSupported: false }).promise; dirty = false; }
     const page = await resultDoc.getPage(cur + 1), v0 = page.getViewport({ scale: 1 });
     // تُعرض الصفحة كاملة داخل ارتفاع الشاشة لسهولة التحرير
@@ -137,6 +139,7 @@ export function objectEditor({ bytes, pdf, textByPage }) {
   return {
     el,
     hasEdits: () => edits.some(e => e.del || e.G),
+    edits: () => edits.filter(e => e.del || e.G),
     async bytes() { if (dirty || !edits.length) { const r = await applyObjectEdits(P || await libs.pdfLib(), bytes, edits, textByPage); return r.bytes; } return resultBytes; },
     count: () => edits.filter(e => e.del || e.G).length,
   };

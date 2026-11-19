@@ -3,6 +3,7 @@ import { h, ico, toast, libs, download, baseName, parseRanges, seg, dropzone, pr
 import { analyze, clean } from './engine.js';
 import { aiStatus, canvasToPayload } from '../ai-tools.js';
 import { objectEditor } from './editor.js';
+import { pageObjects, same, applyObjectEdits } from './objects.js';
 
 const ANN_AR = { Watermark: 'علامات مائية مضافة تعليقًا', Stamp: 'أختام (مثل: معتمد، مسودة، سري)', FreeText: 'نصوص حرة مضافة فوق الصفحات', Text: 'ملاحظات لاصقة', Square: 'مستطيلات مرسومة', Circle: 'دوائر مرسومة', Ink: 'رسومات حرة', Highlight: 'تظليل', Underline: 'تسطير', StrikeOut: 'شطب', Line: 'خطوط', Polygon: 'أشكال', FileAttachment: 'مرفقات', Caret: 'علامات إدراج' };
 const ANN_DEFAULT = new Set(['Watermark', 'Stamp']);
@@ -150,12 +151,27 @@ export function renderWatermark(body) {
       const P = await libs.pdfLib(), N = A.pages;
       const regSet = pagesSet(regionPages, N);
       const regs = regions.map(r => ({ ...r, color: regionColor === 'white' ? [1, 1, 1] : regionColor === 'black' ? [0, 0, 0] : r.sample, hideText }));
-      pb.set(0.1, 'جارٍ حذف العناصر المختارة…');
-      // تُطبَّق المناطق على الصفحات المحددة فقط: تشغيلان إذا اختلفت الصفحات
-      const base = editor?.hasEdits() ? await editor.bytes() : bytes;
-      let out = await clean(P, base, { acrobat: pick.acrobat, annots: [...pick.annots], xobj: [...pick.xobj], text: [...pick.text], textByPage: A.textByPage, regions: regSet ? [] : regs, pages: previewOnly ? new Set([cur]) : null });
-      let stats = out.stats;
-      if (regSet && regs.length) { const o2 = await clean(P, out.bytes, { regions: regs, pages: previewOnly ? new Set([cur].filter(i => regSet.has(i))) : regSet }); out = o2; stats = { ...stats, regions: o2.stats.regions, hiddenUnderRegion: o2.stats.hiddenUnderRegion }; }
+      const only = previewOnly ? new Set([cur]) : null;
+      // المرحلة ١ (آمنة بطبيعتها): علامات Acrobat والتعليقات والأختام
+      pb.set(0.08, 'جارٍ حذف العلامات والأختام…');
+      let base0 = bytes, stats = { acrobat: 0, annots: 0, xobj: 0, text: 0, regions: 0 };
+      if (pick.acrobat || pick.annots.size) { const o = await clean(P, bytes, { acrobat: pick.acrobat, annots: [...pick.annots], pages: only }); base0 = o.bytes; stats = { ...stats, ...o.stats }; }
+      // المرحلة ٢: تعديلات المحرر والعناصر المكررة والمناطق
+      pb.set(0.2, 'جارٍ تعديل العناصر المحددة…');
+      const ed = editor?.hasEdits() ? editor.edits().filter(e => !only || e.scope === 'all' || e.page === cur) : [];
+      let risky = ed.length ? (await applyObjectEdits(P, base0, ed, A.textByPage)).bytes : base0;
+      if (pick.xobj.size || pick.text.size || regs.length) {
+        const o = await clean(P, risky, { xobj: [...pick.xobj], text: [...pick.text], textByPage: A.textByPage, regions: regSet ? [] : regs, pages: only }); risky = o.bytes;
+        stats = { ...stats, xobj: o.stats.xobj, text: o.stats.text, regions: o.stats.regions };
+        if (regSet && regs.length) { const o2 = await clean(P, risky, { regions: regs, pages: only ? new Set([cur].filter(i => regSet.has(i))) : regSet }); risky = o2.bytes; stats.regions = o2.stats.regions; }
+      }
+      // المرحلة ٣: التحقق — لا يُقبل أي تغيير خارج العناصر المحددة؛ الصفحة المتأثرة تُعاد كما كانت
+      let reverted = [];
+      if (risky !== base0) {
+        const v = await verify(P, base0, risky, { ed, regs, regSet, only }, (k, n) => pb.set(0.3 + 0.35 * k / n, `جارٍ التحقق من سلامة الصفحات (${k} من ${n})…`));
+        risky = v.bytes; reverted = v.reverted;
+      }
+      const out = { bytes: risky };
       let finalBytes = out.bytes, rasterDone = 0;
       if (rasterMode !== 'none') {
         const rset = pagesSet(rasterPages, N) || new Set(Array.from({ length: N }, (_, i) => i));
@@ -165,15 +181,50 @@ export function renderWatermark(body) {
         finalBytes = r.bytes; rasterDone = r.done;
       }
       pb.set(1, 'اكتمل.');
-      if (previewOnly) await showCompare(finalBytes, resBox);
+      if (previewOnly) { if (reverted.length) resBox.append(h('div', { class: 'note warn' }, 'هذه الصفحة ستبقى دون تعديل، لأن التعديل كان سيغيّر عناصر أخرى غير المحددة فيها.')); await showCompare(finalBytes, resBox); }
       else {
         download(new Blob([finalBytes], { type: 'application/pdf' }), baseName(file.name) + ' - نظيف.pdf');
         const parts = [editor?.hasEdits() && 'تعديل ' + cnt(editor.count(), 'عنصر واحد', 'عنصرين', 'عناصر') + ' في المحرر', stats.acrobat && 'حذف ' + cnt(stats.acrobat, 'علامة Acrobat واحدة', 'علامتي Acrobat', 'علامات Acrobat'), stats.annots && 'حذف ' + cnt(stats.annots, 'تعليق أو ختم', 'تعليقين أو ختمين', 'تعليقات وأختام'), stats.xobj && 'حذف ' + cnt(stats.xobj, 'صورة أو عنصر', 'صورتين أو عنصرين', 'صور وعناصر'), stats.text && 'حذف ' + cnt(stats.text, 'نص مكرر', 'نصين مكررين', 'نصوص مكررة'), stats.regions && 'تغطية ' + cnt(stats.regions, 'منطقة واحدة', 'منطقتين', 'مناطق'), rasterDone && 'معالجة ' + cnt(rasterDone, 'صفحة ممسوحة واحدة', 'صفحتين ممسوحتين', 'صفحات ممسوحة')].filter(Boolean);
-        resBox.append(h('div', { class: 'note info' }, parts.length ? 'تم: ' + parts.join('، ') + '. نُزّل الملف النظيف.' : 'لم يُختر أي عنصر للحذف؛ نُزّل الملف كما هو.'));
+        const allReverted = reverted.length && reverted.length >= (only ? 1 : N) && !stats.acrobat && !stats.annots && !rasterDone;
+        resBox.append(h('div', { class: allReverted ? 'note warn' : 'note info' }, allReverted ? 'لم يُعدَّل شيء في الملف، لأن التعديل كان سيغيّر عناصر أخرى غير المحددة. نُزّل الملف كما هو.' : parts.length ? (reverted.length ? 'تم في الصفحات السليمة: ' : 'تم: ') + parts.join('، ') + '. نُزّل الملف النظيف.' : 'لم يُختر أي عنصر للحذف؛ نُزّل الملف كما هو.'));
+        if (reverted.length && !allReverted) resBox.append(h('div', { class: 'note warn' }, `لم تُعدَّل ${reverted.length === 1 ? 'الصفحة' : 'الصفحات'} ${reverted.map(i => i + 1).join('، ')}، لأن التعديل كان سيغيّر عناصر أخرى غير المحددة فيها، فبقيت كما هي. يمكنك تعديلها من «هذه الصفحة فقط» في المحرر، أو إرسال صفحة منها لتحسين الأداة.`));
         await showCompare(finalBytes, resBox);
       }
     } catch (e) { console.error(e); toast(e.message || 'حدث خطأ.', true, 7000); }
     btn.disabled = false; setTimeout(() => pb.el.classList.add('hidden'), 800);
+  }
+
+  // يقارن كل صفحة قبل وبعد بكسلًا بكسلًا خارج حدود العناصر المسموح بتغييرها
+  async function verify(P, beforeBytes, afterBytes, { ed, regs, regSet, only }, onStep) {
+    const pdfjs = await libs.pdfjs();
+    const dB = await pdfjs.getDocument({ data: beforeBytes.slice(), isEvalSupported: false }).promise, dA = await pdfjs.getDocument({ data: afterBytes.slice(), isEvalSupported: false }).promise;
+    const docB = await P.PDFDocument.load(beforeBytes, { ignoreEncryption: true, updateMetadata: false });
+    const pagesB = docB.getPages(), idx = only ? [...only] : pagesB.map((_, i) => i), reverted = [];
+    const tb = (bb, G) => { if (!G) return bb; const pt = (x, y) => [x * G[0] + y * G[2] + G[4], x * G[1] + y * G[3] + G[5]]; const p = [pt(bb[0], bb[1]), pt(bb[2], bb[1]), pt(bb[0], bb[3]), pt(bb[2], bb[3])]; return [Math.min(...p.map(q => q[0])), Math.min(...p.map(q => q[1])), Math.max(...p.map(q => q[0])), Math.max(...p.map(q => q[1]))]; };
+    for (let k = 0; k < idx.length; k++) {
+      const pi = idx[k]; onStep(k + 1, idx.length);
+      // المناطق المسموح بتغييرها في هذه الصفحة
+      const objs = pageObjects(P, docB, pagesB[pi], A.textByPage[pi]).objects, allow = [];
+      for (const o of objs) {
+        const e = ed.find(x => (x.scope === 'all' || x.page === pi) && same(x.proto, o)); if (e) { allow.push(o.bbox); if (e.G) allow.push(tb(o.bbox, e.G)); }
+        if ((o.type === 'image' && pick.xobj.has(o.sig)) || (o.type === 'form' && o.ref && pick.xobj.has('form:' + o.ref.toString()))) allow.push(o.bbox);
+        if (o.type === 'text') { const t = o.item.transform, key = o.str + '|' + Math.round(t[4] / 6) + '|' + Math.round(t[5] / 6); if (pick.text.has(key)) allow.push(o.bbox); }
+      }
+      if (!regSet || regSet.has(pi)) for (const r of regs) allow.push([r.x, r.y, r.x + r.w, r.y + r.h]);
+      const pB = await dB.getPage(pi + 1), v = pB.getViewport({ scale: 1.2 });
+      const draw = async (pg) => { const c = document.createElement('canvas'); c.width = Math.ceil(v.width); c.height = Math.ceil(v.height); const x = c.getContext('2d', { willReadFrequently: true }); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); await pg.render({ canvasContext: x, viewport: v }).promise; return x.getImageData(0, 0, c.width, c.height).data; };
+      const a = await draw(pB), b = await draw(await dA.getPage(pi + 1)), W = Math.ceil(v.width), H = Math.ceil(v.height);
+      const mask = new Uint8Array(W * H);
+      for (const bb of allow) { const [x0, y0] = v.convertToViewportPoint(bb[0], bb[1]), [x1, y1] = v.convertToViewportPoint(bb[2], bb[3]); const L = Math.max(0, Math.floor(Math.min(x0, x1)) - 4), R = Math.min(W - 1, Math.ceil(Math.max(x0, x1)) + 4), T = Math.max(0, Math.floor(Math.min(y0, y1)) - 4), B = Math.min(H - 1, Math.ceil(Math.max(y0, y1)) + 4); for (let y = T; y <= B; y++) mask.fill(1, y * W + L, y * W + R + 1); }
+      let bad = 0;
+      for (let i = 0, p = 0; p < W * H; p++, i += 4) if (!mask[p] && (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])) > 120) bad++;
+      if (bad > 25) reverted.push(pi);
+    }
+    if (!reverted.length) return { bytes: afterBytes, reverted };
+    // إعادة الصفحات المتأثرة من النسخة السابقة كما هي
+    const docA = await P.PDFDocument.load(afterBytes, { ignoreEncryption: true, updateMetadata: false }), out = await P.PDFDocument.create(), rs = new Set(reverted);
+    for (let i = 0; i < docA.getPageCount(); i++) { const [cp] = await out.copyPages(rs.has(i) ? docB : docA, [i]); out.addPage(cp); }
+    return { bytes: await out.save({ useObjectStreams: true }), reverted };
   }
 
   // تحويل الصفحات المختارة إلى صور معالجة (تفتيح أو ذكاء اصطناعي) وإعادة بناء الملف

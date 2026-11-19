@@ -42,12 +42,12 @@ function scan(P, doc, b, xo, ctm0, host, out, depth, hosts) {
         const sub = g('Subtype')?.asString?.().slice(1) || '';
         if (sub === 'Image') {
           const w = g('Width')?.asNumber?.() || 0, hh = g('Height')?.asNumber?.() || 0;
-          out.push({ type: 'image', sig: `img:${w}x${hh}:${obj?.contents?.length || 0}`, bbox: unit(ctm), start: o.start, end: o.end, ctm: ctm.slice(), host });
+          out.push({ type: 'image', sig: `img:${w}x${hh}:${obj?.contents?.length || 0}`, bbox: unit(ctm), start: o.start, end: o.end, ctm: ctm.slice(), host, ref });
         } else if (sub === 'Form') {
           const bb = g('BBox')?.asArray?.().map(x => x.asNumber?.() ?? 0) || [0, 0, 1, 1];
           const fm = g('Matrix')?.asArray?.().map(x => x.asNumber?.() ?? 0) || [1, 0, 0, 1, 0, 0];
           const M = mul(fm, ctm);
-          out.push({ type: 'form', sig: `form:${Math.round(bb[2] - bb[0])}x${Math.round(bb[3] - bb[1])}:${obj?.contents?.length || 0}`, bbox: bboxOf([ap(M, bb[0], bb[1]), ap(M, bb[2], bb[1]), ap(M, bb[0], bb[3]), ap(M, bb[2], bb[3])]), start: o.start, end: o.end, ctm: ctm.slice(), host });
+          out.push({ type: 'form', sig: `form:${Math.round(bb[2] - bb[0])}x${Math.round(bb[3] - bb[1])}:${obj?.contents?.length || 0}`, bbox: bboxOf([ap(M, bb[0], bb[1]), ap(M, bb[2], bb[1]), ap(M, bb[0], bb[3]), ap(M, bb[2], bb[3])]), start: o.start, end: o.end, ctm: ctm.slice(), host, ref });
           // العناصر داخل العنصر المركّب: صور وأشكال يمكن تحديدها منفردة
           if (depth < 2) { const fb = streamBytes(P, obj); if (fb) { const fops = scan(P, doc, fb, formXobjects(P, doc, dict), M, ref, out, depth + 1, hosts); hosts?.push({ ref, ops: fops, b: fb, ctm0: M }); } }
         }
