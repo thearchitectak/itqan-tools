@@ -2,6 +2,7 @@
 import { h, ico, toast, libs, download, baseName, parseRanges, seg, dropzone, progressBar } from '../ui.js';
 import { analyze, clean } from './engine.js';
 import { aiStatus, canvasToPayload } from '../ai-tools.js';
+import { objectEditor } from './editor.js';
 
 const ANN_AR = { Watermark: 'علامات مائية مضافة تعليقًا', Stamp: 'أختام (مثل: معتمد، مسودة، سري)', FreeText: 'نصوص حرة مضافة فوق الصفحات', Text: 'ملاحظات لاصقة', Square: 'مستطيلات مرسومة', Circle: 'دوائر مرسومة', Ink: 'رسومات حرة', Highlight: 'تظليل', Underline: 'تسطير', StrikeOut: 'شطب', Line: 'خطوط', Polygon: 'أشكال', FileAttachment: 'مرفقات', Caret: 'علامات إدراج' };
 const ANN_DEFAULT = new Set(['Watermark', 'Stamp']);
@@ -34,6 +35,7 @@ export function renderWatermark(body) {
       }
       pb.set(0.9, 'البحث عن العلامات والعناصر المكررة…');
       A = await analyze(await libs.pdfLib(), bytes, tbp);
+      editor = objectEditor({ bytes, pdf, textByPage: tbp });
       pick.acrobat = A.acrobat > 0;
       pick.annots = new Set(Object.keys(A.annots).filter(k => ANN_DEFAULT.has(k)));
       pick.text = new Set(A.text.filter(t => t.rotated).map(t => t.key));
@@ -44,7 +46,7 @@ export function renderWatermark(body) {
   function reset() { bytes = null; pdf = null; A = null; regions.length = 0; work.classList.add('hidden'); upload.classList.remove('hidden'); }
 
   /* ---------- اللوحة الرئيسية ---------- */
-  let rasterMode = 'none', strength = 50, colored = false, dpi = 200, rasterPages = '', regionPages = '', regionColor = 'auto', hideText = true;
+  let rasterMode = 'none', strength = 50, colored = false, dpi = 200, rasterPages = '', regionPages = '', regionColor = 'auto', hideText = false, editor = null;
   const preview = h('div', { class: 'wm-prev' }), regList = h('div');
   function draw() {
     work.innerHTML = '';
@@ -93,10 +95,11 @@ export function renderWatermark(body) {
 
     work.append(
       h('div', { class: 'panel' }, h('div', { class: 'row' }, h('b', {}, file.name), h('span', { class: 'muted' }, ` — ${cnt(N, 'صفحة واحدة', 'صفحتان', 'صفحات')}${A.scanned ? ' — ممسوح ضوئيًا' : ''}`), h('span', { class: 'spacer' }), h('button', { class: 'btn light sm', onclick: reset }, ico('x', 16), 'ملف آخر'))),
-      h('div', { class: 'panel' }, h('h3', {}, '١. ما اكتُشف تلقائيًا'), h('p', { class: 'muted' }, 'حدّد ما تريد حذفه. الحذف هنا نظيف: يُزال العنصر نفسه ويبقى المحتوى تحته سليمًا.'), found),
-      h('div', { class: 'panel' }, h('h3', {}, '٢. تغطية منطقة ثابتة (اختياري)'), h('p', { class: 'muted' }, 'اسحب على الصفحة لتحديد منطقة (رقم صفحة قديم، شعار في الهامش…)، فتُغطّى في كل الصفحات المحددة. يمكنك تحديد أكثر من منطقة.'),
-        h('div', { class: 'row' }, pageSel, colorSeg), h('div', { class: 'opts' }, h('label', { class: 'check' }, hide, 'حذف النص الموجود تحت المنطقة أيضًا'), h('label', { class: 'field' }, h('span', {}, 'الصفحات'), rp)), regList, preview),
-      h('div', { class: 'panel' }, h('h3', {}, '٣. الصفحات الممسوحة ضوئيًا (اختياري)'), h('p', { class: 'muted' }, A.scanned ? 'الملف ممسوح ضوئيًا، فالعلامة جزء من صورة الصفحة. اختر طريقة المعالجة:' : 'للصفحات التي تكون العلامة فيها جزءًا من الصورة نفسها.'), rm, rOpts),
+      h('div', { class: 'panel' }, h('h3', {}, '١. تحرير العناصر (مثل Edit All في Foxit)'), h('p', { class: 'muted' }, 'اضغط على العلامة المائية أو أي عنصر (صورة، شعار، شكل، نص) لتحديده، ثم احذفه أو حرّكه أو كبّره أو صغّره، فيُطبَّق على العنصر نفسه في كل الصفحات التي يتكرر فيها.'), editor.el),
+      h('div', { class: 'panel' }, h('h3', {}, '٢. ما اكتُشف تلقائيًا'), h('p', { class: 'muted' }, 'حدّد ما تريد حذفه. الحذف هنا نظيف: يُزال العنصر نفسه ويبقى المحتوى تحته سليمًا.'), found),
+      h('div', { class: 'panel' }, h('h3', {}, '٣. تغطية منطقة ثابتة (اختياري)'), h('p', { class: 'muted' }, 'اسحب على الصفحة لتحديد منطقة (رقم صفحة قديم، شعار في الهامش…)، فتُغطّى في كل الصفحات المحددة. يمكنك تحديد أكثر من منطقة.'),
+        h('div', { class: 'row' }, pageSel, colorSeg), h('div', { class: 'opts' }, h('label', { class: 'check' }, hide, 'حذف النص الموجود تحت المنطقة أيضًا (انتبه: يحذف أي نص يقع داخلها)'), h('label', { class: 'field' }, h('span', {}, 'الصفحات'), rp)), regList, preview),
+      h('div', { class: 'panel' }, h('h3', {}, '٤. الصفحات الممسوحة ضوئيًا (اختياري)'), h('p', { class: 'muted' }, A.scanned ? 'الملف ممسوح ضوئيًا، فالعلامة جزء من صورة الصفحة. اختر طريقة المعالجة:' : 'للصفحات التي تكون العلامة فيها جزءًا من الصورة نفسها.'), rm, rOpts),
       h('div', { class: 'panel' }, h('div', { class: 'actions' }, prevBtn, goBtn), pb.el, h('div', { class: 'wm-result' })));
     drawRegions(); showPage();
   }
@@ -149,7 +152,8 @@ export function renderWatermark(body) {
       const regs = regions.map(r => ({ ...r, color: regionColor === 'white' ? [1, 1, 1] : regionColor === 'black' ? [0, 0, 0] : r.sample, hideText }));
       pb.set(0.1, 'جارٍ حذف العناصر المختارة…');
       // تُطبَّق المناطق على الصفحات المحددة فقط: تشغيلان إذا اختلفت الصفحات
-      let out = await clean(P, bytes, { acrobat: pick.acrobat, annots: [...pick.annots], xobj: [...pick.xobj], text: [...pick.text], textByPage: A.textByPage, regions: regSet ? [] : regs, pages: previewOnly ? new Set([cur]) : null });
+      const base = editor?.hasEdits() ? await editor.bytes() : bytes;
+      let out = await clean(P, base, { acrobat: pick.acrobat, annots: [...pick.annots], xobj: [...pick.xobj], text: [...pick.text], textByPage: A.textByPage, regions: regSet ? [] : regs, pages: previewOnly ? new Set([cur]) : null });
       let stats = out.stats;
       if (regSet && regs.length) { const o2 = await clean(P, out.bytes, { regions: regs, pages: previewOnly ? new Set([cur].filter(i => regSet.has(i))) : regSet }); out = o2; stats = { ...stats, regions: o2.stats.regions, hiddenUnderRegion: o2.stats.hiddenUnderRegion }; }
       let finalBytes = out.bytes, rasterDone = 0;
@@ -164,7 +168,7 @@ export function renderWatermark(body) {
       if (previewOnly) await showCompare(finalBytes, resBox);
       else {
         download(new Blob([finalBytes], { type: 'application/pdf' }), baseName(file.name) + ' - نظيف.pdf');
-        const parts = [stats.acrobat && 'حذف ' + cnt(stats.acrobat, 'علامة Acrobat واحدة', 'علامتي Acrobat', 'علامات Acrobat'), stats.annots && 'حذف ' + cnt(stats.annots, 'تعليق أو ختم', 'تعليقين أو ختمين', 'تعليقات وأختام'), stats.xobj && 'حذف ' + cnt(stats.xobj, 'صورة أو عنصر', 'صورتين أو عنصرين', 'صور وعناصر'), stats.text && 'حذف ' + cnt(stats.text, 'نص مكرر', 'نصين مكررين', 'نصوص مكررة'), stats.regions && 'تغطية ' + cnt(stats.regions, 'منطقة واحدة', 'منطقتين', 'مناطق'), rasterDone && 'معالجة ' + cnt(rasterDone, 'صفحة ممسوحة واحدة', 'صفحتين ممسوحتين', 'صفحات ممسوحة')].filter(Boolean);
+        const parts = [editor?.hasEdits() && 'تعديل ' + cnt(editor.count(), 'عنصر واحد', 'عنصرين', 'عناصر') + ' في المحرر', stats.acrobat && 'حذف ' + cnt(stats.acrobat, 'علامة Acrobat واحدة', 'علامتي Acrobat', 'علامات Acrobat'), stats.annots && 'حذف ' + cnt(stats.annots, 'تعليق أو ختم', 'تعليقين أو ختمين', 'تعليقات وأختام'), stats.xobj && 'حذف ' + cnt(stats.xobj, 'صورة أو عنصر', 'صورتين أو عنصرين', 'صور وعناصر'), stats.text && 'حذف ' + cnt(stats.text, 'نص مكرر', 'نصين مكررين', 'نصوص مكررة'), stats.regions && 'تغطية ' + cnt(stats.regions, 'منطقة واحدة', 'منطقتين', 'مناطق'), rasterDone && 'معالجة ' + cnt(rasterDone, 'صفحة ممسوحة واحدة', 'صفحتين ممسوحتين', 'صفحات ممسوحة')].filter(Boolean);
         resBox.append(h('div', { class: 'note info' }, parts.length ? 'تم: ' + parts.join('، ') + '. نُزّل الملف النظيف.' : 'لم يُختر أي عنصر للحذف؛ نُزّل الملف كما هو.'));
         await showCompare(finalBytes, resBox);
       }

@@ -64,14 +64,14 @@ export function parseOps(b) {
 }
 
 /* ======================= تتبّع المواضع ======================= */
-const mul = (m, n) => [m[0] * n[0] + m[1] * n[2], m[0] * n[1] + m[1] * n[3], m[2] * n[0] + m[3] * n[2], m[2] * n[1] + m[3] * n[3], m[4] * n[0] + m[5] * n[2] + n[4], m[4] * n[1] + m[5] * n[3] + n[5]];
+export const mul = (m, n) => [m[0] * n[0] + m[1] * n[2], m[0] * n[1] + m[1] * n[3], m[2] * n[0] + m[3] * n[2], m[2] * n[1] + m[3] * n[3], m[4] * n[0] + m[5] * n[2] + n[4], m[4] * n[1] + m[5] * n[3] + n[5]];
 const nums = (a) => a.filter(t => t.t === 'num').map(t => t.v);
 const TEXT_SHOW = new Set(['Tj', 'TJ', "'", '"']);
 
 // يمر على الأوامر ويحسب لكل أمر عرض نص موضع بدايته في إحداثيات الصفحة، وحالة Tr الحالية،
 // ولكل Do اسم الكائن ومصفوفة التحويل، ولكل BDC/BMC المقطع الكامل حتى EMC المطابق
-export function walk(ops) {
-  let ctm = [1, 0, 0, 1, 0, 0], tm = [1, 0, 0, 1, 0, 0], tlm = [1, 0, 0, 1, 0, 0], TL = 0, Tr = 0, Ts = 0;
+export function walk(ops, ctm0) {
+  let ctm = ctm0 ? ctm0.slice() : [1, 0, 0, 1, 0, 0], tm = [1, 0, 0, 1, 0, 0], tlm = [1, 0, 0, 1, 0, 0], TL = 0, Tr = 0, Ts = 0;
   const stack = [], marks = [], open = [];
   ops.forEach((o, idx) => {
     const a = nums(o.args);
@@ -98,7 +98,7 @@ export function walk(ops) {
 }
 
 /* ======================= أدوات pdf-lib ======================= */
-function contentBytes(P, doc, page) {
+export function contentBytes(P, doc, page) {
   const { PDFArray, PDFRawStream, decodePDFRawStream, PDFName } = P;
   const c = page.node.get(PDFName.of('Contents')); if (!c) return new Uint8Array();
   const refs = c instanceof PDFArray ? c.asArray() : [c];
@@ -116,12 +116,12 @@ function contentBytes(P, doc, page) {
   const len = parts.reduce((a, p) => a + p.length, 0), out = new Uint8Array(len); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
   return out;
 }
-function setContent(P, doc, page, bytes) {
+export function setContent(P, doc, page, bytes) {
   const s = doc.context.flateStream(bytes);
   page.node.set(P.PDFName.of('Contents'), doc.context.register(s));
 }
 // تطبيق تعديلات: [{ start, end, text }] — تُستبدل المقاطع بالنص (فارغ = حذف)
-function applyEdits(bytes, edits) {
+export function applyEdits(bytes, edits) {
   edits.sort((a, b) => a.start - b.start);
   const enc = new TextEncoder(), out = []; let pos = 0;
   for (const e of edits) { if (e.start < pos) continue; out.push(bytes.subarray(pos, e.start), enc.encode(e.text ?? ' ')); pos = e.end; }
@@ -129,7 +129,7 @@ function applyEdits(bytes, edits) {
   const len = out.reduce((a, p) => a + p.length, 0), r = new Uint8Array(len); let o = 0; for (const p of out) { r.set(p, o); o += p.length; }
   return r;
 }
-function xobjects(P, doc, page) {
+export function xobjects(P, doc, page) {
   const { PDFName, PDFDict } = P;
   let res = page.node.Resources ? page.node.Resources() : null;
   if (!res) return {};

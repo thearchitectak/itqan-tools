@@ -505,3 +505,17 @@ iframe.service-frame { width: 100%; min-height: 75vh; border: 1px solid var(--li
 .wm-cmp canvas { max-width:100%; height:auto; border:1px solid var(--line); border-radius:8px }
 .wm-cmp figcaption { font-weight:700; font-size:13px; margin-top:4px }
 @media (max-width:640px) { .wm-cmp { grid-template-columns:1fr } }
+/* محرر العناصر */
+.oe { display:flex; flex-direction:column; gap:8px }
+.oe-bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center }
+.oe-info { font-size:14px; padding:6px 10px; border-radius:8px; background:color-mix(in srgb,var(--tool-color) 8%,var(--card)); border:1px solid color-mix(in srgb,var(--tool-color) 30%,var(--line)) }
+.oe-info.muted { background:var(--bg); border-color:var(--line) }
+.oe-stage { display:flex; justify-content:center }
+.oe-wrap { position:relative; display:inline-block; max-width:100%; cursor:default; touch-action:none; outline:none; user-select:none }
+.oe-wrap canvas { display:block; max-width:100%; height:auto; border:1px solid var(--line); border-radius:8px; box-shadow:var(--shadow) }
+.oe-ov { position:absolute; inset:0; pointer-events:none }
+.oe-box { position:absolute; border:1px dashed rgba(112,72,232,.55) }
+.oe-box.t-text { border-color:rgba(29,138,78,.45) }
+.oe-box.sel { border:2px solid #1c7ed6; background:rgba(28,126,214,.12); box-shadow:0 0 0 1px #fff }
+.oe-marq { position:absolute; border:1.5px dashed #1c7ed6; background:rgba(28,126,214,.08) }
+.btn.danger { background:#e5322d; color:#fff }
