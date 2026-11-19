@@ -107,10 +107,11 @@ function mockVision(prompt) {
     return { text: JSON.stringify({ name: 'طالب تجريبي', id: '1001', answers: Array.from({ length: n }, (_, i) => ({ q: i + 1, a: i === 2 ? 'blank' : 'أ' })) }), sources: [] };
   }
   if (prompt.includes('[SHOT]')) return { text: JSON.stringify({ shot: { type: 'interior', time: 'day', lighting_ar: 'إضاءة نهارية ناعمة من نافذة جانبية كبيرة.', hdri_keywords: ['clear sky', 'midday'] }, materials: [
-    { name_ar: 'رخام أبيض مصقول بعروق رمادية', where_ar: 'الأرضية', category: 'marble', keywords: ['white', 'marble', 'polished'], color: 'white', finish: 'glossy', metal: false, tile_m: 0.6 },
+    { name_ar: 'رخام أبيض مصقول بعروق رمادية', where_ar: 'الأرضية', category: 'marble', keywords: ['white', 'marble', 'polished'], color: 'white', finish: 'glossy', metal: false, tile_m: 0.6, box: [0.3, 0.8, 0.25, 0.12] },
     { name_ar: 'باركيه خشب بلوط فاتح', where_ar: 'أرضية غرفة المعيشة', category: 'floor_wood', keywords: ['oak', 'wood', 'floor', 'planks'], color: 'light brown', finish: 'satin', metal: false, tile_m: 0.2 },
     { name_ar: 'قماش كتان رمادي', where_ar: 'الكنبة', category: 'fabric', keywords: ['linen', 'fabric', 'grey'], color: 'grey', finish: 'matte', metal: false, tile_m: null },
     { name_ar: 'نحاس مطلي مصقول بنقش زخرفي نادر', where_ar: 'إطار المرآة', category: 'metal', keywords: ['ornate', 'brass', 'engraved'], color: 'gold', finish: 'glossy', metal: true, tile_m: null }] }), sources: [] };
+  if (prompt.includes('[MAT]')) return { text: JSON.stringify({ name_ar: 'قماش كتان رمادي فاتح', category: 'fabric', keywords: ['linen', 'fabric', 'grey', 'woven'], alt_keywords: ['fabric', 'cloth'], color: 'light grey', finish: 'matte', metal: false, pattern_ar: 'نسيج ناعم متقاطع' }), sources: [] };
   if (prompt.includes('[TABLE]')) return { text: JSON.stringify({ tables: [{ title: 'جدول تجريبي', rows: [['البند', 'الكمية', 'السعر'], ['أسمنت', '10', '250']] }] }), sources: [] };
   return { text: JSON.stringify({ rtl: true, blocks: [{ type: 'heading', text: 'عنوان تجريبي' }, { type: 'paragraph', text: 'فقرة مستخرجة من صورة الصفحة.' }, { type: 'list', items: ['بند أول', 'بند ثانٍ'] }, { type: 'table', rows: [['أ', 'ب'], ['1', '2']] }] }), sources: [] };
 }

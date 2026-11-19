@@ -4,6 +4,7 @@ import { aiPicker, vision } from '../ai-tools.js';
 import { searchMaterials, resolutionsOf, fetchMaps, RES_ORDER, smartFetch } from './lib.js';
 import { makeInfo, materialFiles, makeWriter, canPickFolder, savedFolder, chooseFolder, ensurePermission, ROOT_NAME } from './pack.js';
 import { imageToMaps } from './maps.js';
+import { analysisCanvas, regionGrow, rectMask, regionFeatures, rank, similarity, colorWords } from './match.js';
 
 const CATS = [['', 'الكل'], ['marble', 'رخام'], ['wood', 'خشب'], ['parquet floor', 'باركيه'], ['tiles', 'بلاط'], ['concrete', 'خرسانة'], ['plaster', 'محارة ودهان'], ['brick', 'طوب'], ['stone', 'حجر'], ['metal', 'معادن'], ['fabric', 'أقمشة'], ['leather', 'جلد'], ['carpet', 'سجاد'], ['asphalt', 'أسفلت'], ['ground', 'أرض وتربة'], ['grass', 'نجيل'], ['gravel', 'حصى'], ['roof', 'أسقف']];
 const CAT_AR = { wood: 'خشب', floor_wood: 'أرضية خشبية', marble: 'رخام', stone: 'حجر', concrete: 'خرسانة', plaster: 'محارة', paint: 'دهان', brick: 'طوب', tiles: 'بلاط', ceramic: 'سيراميك', terrazzo: 'تيرازو', metal: 'معدن', fabric: 'قماش', leather: 'جلد', carpet: 'سجاد', wallpaper: 'ورق حائط', glass: 'زجاج', plastic: 'بلاستيك', asphalt: 'أسفلت', ground: 'أرض', grass: 'نجيل', gravel: 'حصى', sand: 'رمل', roofing: 'سقف', other: 'أخرى' };
@@ -100,8 +101,9 @@ export function renderMaterials(body) {
   };
 
   /* ---------- بطاقة نتيجة ---------- */
-  const card = (m, meta, onPick) => h('button', { type: 'button', class: 'rs-card', title: m.name, onclick: () => onPick ? onPick(m) : addToCart(m, meta) },
-    h('img', { src: m.thumb, alt: '', loading: 'lazy' }), h('span', {}, m.name), h('small', {}, m.src === 'ph' ? 'Poly Haven' : 'ambientCG'));
+  const card = (m, meta, onPick, sim) => h('button', { type: 'button', class: 'rs-card', title: m.name, onclick: () => onPick ? onPick(m) : addToCart(m, meta) },
+    h('img', { src: m.thumb, alt: '', loading: 'lazy' }), h('span', {}, m.name), h('small', {}, m.src === 'ph' ? 'Poly Haven' : 'ambientCG'),
+    sim != null ? h('em', { class: 'rs-sim ' + (sim >= 70 ? 'hi' : sim >= 55 ? 'mid' : 'lo') }, `تشابه ${sim}%`) : null);
 
   /* ---------- تبويب البحث في المكتبة ---------- */
   const q = h('input', { class: 'input', type: 'search', placeholder: 'ابحث بالعربية أو الإنجليزية: رخام أبيض مصقول، باركيه بلوط، طوب أحمر…' });
@@ -120,58 +122,190 @@ export function renderMaterials(body) {
   const libTab = h('div', {}, q, chips, grid);
 
   /* ---------- تبويب صورة الشوت ---------- */
-  const picker = aiPicker('mat-shot', { note: 'يحلّل الذكاء الاصطناعي اللقطة ويتعرّف على خاماتها ونوع إضاءتها، ثم يبحث عن خامات مطابقة في المكتبات.' });
-  const shotPreview = h('div', { class: 'rs-shot' });
+  // الفكرة: اللقطة فيها خامات كثيرة، فلا تُحلَّل كاملة كخامة واحدة. يحدد المستخدم كل سطح (نقرة أو مستطيل)،
+  // ثم تُقارن بصمته البصرية بصور خامات المكتبة نفسها. مع الذكاء الاصطناعي يُوصف الجزء المحدد بدقة أولًا ثم تُرتَّب النتائج بصريًا.
+  const picker = aiPicker('mat-shot', { note: 'يُرسل الجزء الذي تحدده من اللقطة فقط ليصف الذكاء الاصطناعي خامته بدقة، ثم تُرتَّب خامات المكتبة حسب قربها البصري منه.' });
+  const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ec4899', '#14b8a6', '#a855f7', '#ef4444', '#84cc16', '#06b6d4', '#f97316'];
+  let A = null, sels = [];
+  const stage = h('div', { class: 'rs-stage' }), view = document.createElement('canvas'), over = document.createElement('canvas');
+  stage.append(view, over);
+  const tol = h('input', { type: 'range', min: 6, max: 30, step: 1, value: 14 });
+  const fullAiBtn = h('button', { class: 'btn light sm', type: 'button' }, ico('sparkles', 16), 'تحليل اللقطة كاملة بالذكاء الاصطناعي');
+  const clearBtn = h('button', { class: 'btn light sm', type: 'button' }, ico('trash-2', 16), 'مسح التحديدات');
+  const toMapsShot = h('button', { class: 'btn light sm', type: 'button' }, ico('layers', 16), 'تحويل اللقطة إلى خرائط');
+  const shotTools = h('div', { class: 'rs-shot-tools hidden' },
+    h('div', { class: 'note info' }, h('b', {}, 'حدّد الخامة على الصورة: '), 'اضغط على السطح (الكنبة، الأرضية، الحائط…) فيُحدَّد تلقائيًا، أو اسحب لرسم مستطيل داخل الخامة. يمكنك تحديد أكثر من خامة، وتظهر نتائج كل واحدة أسفل الصورة.'),
+    stage,
+    h('div', { class: 'rs-row' }, h('label', { class: 'field', style: { minWidth: '220px' } }, h('span', {}, 'حساسية التحديد بالنقر'), tol, h('small', {}, 'قلّلها إن امتد التحديد إلى أسطح مجاورة، وزدها إن لم يغطِّ السطح')), clearBtn, toMapsShot, fullAiBtn));
   const shotResults = h('div');
-  const analyze = async () => {
-    shotResults.innerHTML = '';
-    if (!picker.isAi) { localMatch(); return; }
-    shotResults.append(h('p', { class: 'muted center' }, 'جارٍ تحليل اللقطة والتعرّف على الخامات…'));
-    let d;
-    try { d = (await vision('shot', shotImg, { provider: picker.value, maxSide: 1600 })).data; }
-    catch (e) { shotResults.innerHTML = ''; shotResults.append(h('div', { class: 'note err' }, e.message)); return; }
-    try { sessionStorage.setItem('itq-shot', JSON.stringify(d.shot || {})); } catch { }
-    shotResults.innerHTML = '';
-    const s = d.shot || {};
-    shotResults.append(h('div', { class: 'note info' }, `نوع اللقطة: ${s.type === 'exterior' ? 'خارجية' : 'داخلية'} — الوقت: ${({ day: 'نهار', sunset: 'غروب', night: 'ليل', overcast: 'غائم' })[s.time] || '—'}. ${s.lighting_ar || ''} يمكنك تجهيز إضاءتها من أداة «الإضاءة وإعدادات الريندر».`));
-    for (const mat of (d.materials || []).slice(0, 12)) shotResults.append(materialRow(mat));
-  };
+  const shotPreview = h('div');
 
-  // صف خامة مكتشفة: مرشحات من المكتبة، أو بديل مشابه، أو توليد
-  const materialRow = (mat) => {
-    const meta = { category: mat.category, finish: mat.finish, metal: mat.metal, name_ar: mat.name_ar };
-    const cands = h('div', { class: 'rs-grid small' }, h('p', { class: 'muted' }, 'جارٍ البحث عن خامات مطابقة…'));
-    const extra = h('div', { class: 'rs-row' });
-    const row = h('div', { class: 'panel rs-mat' },
-      h('div', { class: 'rs-mat-head' }, h('b', {}, mat.name_ar), h('span', { class: 'rs-src' }, mat.where_ar || ''), h('span', { class: 'rs-src' }, CAT_AR[mat.category] || '')),
-      cands, extra);
-    const words = [...new Set((mat.keywords || []).flatMap(k => String(k).toLowerCase().split(/\s+/)))];
-    const show = (list, title) => { cands.innerHTML = ''; if (title) cands.append(h('p', { class: 'muted', style: { gridColumn: '1/-1', margin: 0 } }, title)); list.forEach(m => cands.append(card(m, meta))); };
+  function paintOverlay(tmp) {
+    const x = over.getContext('2d'); x.clearRect(0, 0, over.width, over.height);
+    const sx = over.width / A.w, sy = over.height / A.h;
+    sels.forEach((s, i) => {
+      const col = COLORS[i % COLORS.length], im = x.createImageData(A.w, A.h), [r, g, b] = [1, 3, 5].map(k => parseInt(col.slice(k, k + 2), 16));
+      for (let j = 0; j < s.mask.length; j++) if (s.mask[j]) { const o = j * 4; im.data[o] = r; im.data[o + 1] = g; im.data[o + 2] = b; im.data[o + 3] = 95; }
+      const t = document.createElement('canvas'); t.width = A.w; t.height = A.h; t.getContext('2d').putImageData(im, 0, 0);
+      x.drawImage(t, 0, 0, over.width, over.height);
+      const [bx, by, bw, bh] = s.bbox; x.strokeStyle = col; x.lineWidth = 2; x.strokeRect(bx * sx, by * sy, bw * sx, bh * sy);
+      x.fillStyle = col; x.beginPath(); x.arc(bx * sx + 14, by * sy + 14, 12, 0, 7); x.fill(); x.fillStyle = '#fff'; x.font = 'bold 14px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(i + 1), bx * sx + 14, by * sy + 15);
+    });
+    if (tmp) { x.setLineDash([6, 4]); x.strokeStyle = '#fff'; x.lineWidth = 2; x.strokeRect(...tmp); x.setLineDash([]); }
+  }
+  // التفاعل: نقرة = تحديد تلقائي للسطح، سحب = مستطيل
+  let drag = null;
+  const pos = (e) => { const r = over.getBoundingClientRect(); return [(e.clientX - r.left) * over.width / r.width, (e.clientY - r.top) * over.height / r.height]; };
+  over.onpointerdown = (e) => { if (!A) return; drag = { p0: pos(e) }; over.setPointerCapture(e.pointerId); };
+  over.onpointermove = (e) => { if (!drag) return; const [x, y] = pos(e), [x0, y0] = drag.p0; drag.rect = [Math.min(x, x0), Math.min(y, y0), Math.abs(x - x0), Math.abs(y - y0)]; paintOverlay(drag.rect); };
+  over.onpointerup = (e) => {
+    if (!drag) return; const d = drag; drag = null;
+    const fx = A.w / over.width, fy = A.h / over.height;
+    let sel;
+    if (d.rect && d.rect[2] > 12 && d.rect[3] > 12) sel = rectMask(A, d.rect[0] * fx, d.rect[1] * fy, d.rect[2] * fx, d.rect[3] * fy);
+    else {
+      const px = Math.min(A.w - 1, Math.max(0, Math.round(d.p0[0] * fx))), py = Math.min(A.h - 1, Math.max(0, Math.round(d.p0[1] * fy)));
+      sel = regionGrow(A, px, py, +tol.value);
+      if (sel.count < 60) { toast('المنطقة المحددة صغيرة جدًا. زد حساسية التحديد أو اسحب مستطيلًا داخل الخامة.', true); paintOverlay(); return; }
+    }
+    sels.push(sel); paintOverlay(); shotResults.append(selectionRow(sel, sels.length - 1));
+  };
+  clearBtn.onclick = () => { sels = []; paintOverlay(); shotResults.innerHTML = ''; };
+  toMapsShot.onclick = () => { window.__itqPendingTexture = shotImg; location.hash = '#/tool/tex-maps'; };
+  fullAiBtn.onclick = () => analyzeFull();
+
+  // قصّ منطقة محددة (بهامش بسيط) من اللقطة الأصلية
+  const cropOf = (sel, pad = 0.06) => {
+    const inv = 1 / A.k, [bx, by, bw, bh] = sel.bbox, px = bw * pad, py = bh * pad;
+    const x0 = Math.max(0, (bx - px) * inv), y0 = Math.max(0, (by - py) * inv), w = Math.min(shotImg.width - x0, (bw + 2 * px) * inv), hh = Math.min(shotImg.height - y0, (bh + 2 * py) * inv);
+    const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(hh)); c.getContext('2d').drawImage(shotImg, x0, y0, w, hh, 0, 0, c.width, c.height); return c;
+  };
+  // جمع المرشحين: بالكلمات (من الذكاء الاصطناعي أو من نوع الخامة)
+  const CAT_WORDS = CATS.filter(c => c[0]).map(c => c[0]);
+  async function poolFor(wordSets, per) {
+    const seen = new Map();
+    wordSets = wordSets.map(ws => Object.assign(ws.filter(Boolean), { _cat: ws._cat || '', _w: ws._w || 1 })).filter(ws => ws.length);
+    const lists = await Promise.allSettled(wordSets.map(ws => searchMaterials('', { words: ws, limit: per })));
+    lists.forEach((r, i) => { if (r.status === 'fulfilled') for (const m of r.value) { const k = m.src + m.id, w = wordSets[i]._w || 1; const o = seen.get(k); if (!o) seen.set(k, { ...m, _cat: wordSets[i]._cat || '', _w: w }); else if (w < o._w) o._w = w; } });
+    return [...seen.values()];
+  }
+  const tagCat = (ws, cat) => Object.assign(ws, { _cat: cat });
+
+  // صف نتائج تحديد واحد
+  function selectionRow(sel, idx) {
+    const col = COLORS[idx % COLORS.length], feat = regionFeatures(shotImg, A, sel), crop = cropOf(sel, 0);
+    const thumb = h('canvas', { class: 'rs-sel-thumb' }); { const k = 72 / Math.max(crop.width, crop.height); thumb.width = Math.max(1, Math.round(crop.width * k)); thumb.height = Math.max(1, Math.round(crop.height * k)); thumb.getContext('2d').drawImage(crop, 0, 0, thumb.width, thumb.height); }
+    const title = h('b', {}, `الخامة ${idx + 1}`), info = h('span', { class: 'rs-src' }, ''), status = h('p', { class: 'muted' }, 'جارٍ التحليل…');
+    const chips = h('div', { class: 'rs-chips' }), grid = h('div', { class: 'rs-grid small' }), extra = h('div', { class: 'rs-row' });
+    const removeBtn = h('button', { class: 'btn light sm', type: 'button', title: 'إزالة' }, ico('x', 14));
+    const row = h('div', { class: 'panel rs-mat', style: { borderInlineStart: `5px solid ${col}` } },
+      h('div', { class: 'rs-mat-head' }, thumb, h('div', { style: { flex: 1 } }, title, ' ', info), removeBtn), chips, status, grid, extra);
+    removeBtn.onclick = () => { const i = sels.indexOf(sel); if (i >= 0) sels.splice(i, 1); row.remove(); paintOverlay(); };
+    let meta = { category: '' }, desc = null;
+    const show = (ranked, cat) => {
+      grid.innerHTML = '';
+      const list = cat ? ranked.filter(r => r.m._cat === cat) : ranked;
+      list.slice(0, 8).forEach(({ m, d }) => grid.append(card(m, { ...meta, category: meta.category || CAT_FROM[m._cat] || '' }, null, similarity(d))));
+      if (!list.length) grid.append(h('p', { class: 'muted' }, 'لا توجد نتائج لهذا النوع.'));
+    };
+    const finish = (best) => {
+      extra.innerHTML = '';
+      const toMaps = h('button', { class: 'btn light sm', type: 'button' }, ico('layers', 16), 'تحويل هذا الجزء إلى خرائط');
+      toMaps.onclick = () => { window.__itqPendingTexture = cropOf(sel, 0); location.hash = '#/tool/tex-maps'; };
+      extra.append(toMaps);
+      if (desc) { const genBtn = h('button', { class: 'btn light sm', type: 'button' }, ico('sparkles', 16), 'توليدها بالذكاء الاصطناعي'); genBtn.onclick = () => generate(desc, meta, genBtn); extra.append(genBtn); }
+      if (best < 55) extra.prepend(h('p', { class: 'note warn', style: { width: '100%' } }, 'التشابه البصري ضعيف: قد لا تكون هذه الخامة موجودة في المكتبات المجانية. جرّب «تحويل هذا الجزء إلى خرائط»' + (desc ? ' أو «توليدها بالذكاء الاصطناعي».' : '، أو استخدم وضع الذكاء الاصطناعي لوصفها بدقة.')));
+    };
     (async () => {
+      if (!feat) { status.textContent = 'تعذّر تحليل هذه المنطقة. حدّد مساحة أكبر من الخامة.'; return; }
       try {
-        const r = await searchMaterials('', { words, limit: 8 });
-        const best = r[0]?._s || 0, strong = r.filter(x => x._s >= Math.max(4, best * 0.6));
-        if (strong.length && best >= Math.min(6, words.length * 2)) show(strong.slice(0, 6), 'اضغط الخامة المناسبة لإضافتها:');
-        else {
-          cands.innerHTML = ''; cands.append(h('p', { class: 'note warn', style: { gridColumn: '1/-1' } }, 'لم أجد خامة مطابقة تمامًا في المكتبات المجانية. اختر أحد الاقتراحين:'));
-          const simBtn = h('button', { class: 'btn light sm', type: 'button' }, ico('search', 16), 'عرض خامات مشابهة');
-          simBtn.onclick = async () => {
-            simBtn.disabled = true;
-            try {
-              const base = (CAT_EN[mat.category] || mat.category || '').split(' ');
-              const r2 = await searchMaterials('', { words: [...new Set([...base, ...String(mat.color || '').toLowerCase().split(/\s+/)].filter(Boolean))], limit: 8 });
-              show(r2.slice(0, 8), 'خامات مشابهة (أقرب ما في المكتبة):');
-            } catch (e) { toast(e.message, true); }
-            simBtn.disabled = false;
-          };
-          const genBtn = h('button', { class: 'btn light sm', type: 'button' }, ico('sparkles', 16), 'توليدها بالذكاء الاصطناعي');
-          genBtn.onclick = () => generate(mat, meta, genBtn);
-          extra.append(simBtn, genBtn);
+        let pool;
+        if (picker.isAi) {
+          status.textContent = 'يصف الذكاء الاصطناعي الخامة المحددة…';
+          desc = (await vision('mat', cropOf(sel), { provider: picker.value, maxSide: 900 })).data || {};
+          meta = { category: desc.category, finish: desc.finish, metal: desc.metal, name_ar: desc.name_ar };
+          title.textContent = `${idx + 1}. ${desc.name_ar || 'خامة'}`; info.textContent = [CAT_AR[desc.category], desc.pattern_ar].filter(Boolean).join(' — ');
+          const kw = (desc.keywords || []).map(String), alt = (desc.alt_keywords || []).map(String);
+          const base = (CAT_EN[desc.category] || '').split(' ').filter(Boolean);
+          status.textContent = 'جارٍ البحث في المكتبات والمقارنة البصرية…';
+          const wt = (ws, w) => Object.assign(ws, { _w: w });
+          pool = await poolFor([wt(kw.join(' ').toLowerCase().split(/\s+/), 0.7), wt(alt.join(' ').toLowerCase().split(/\s+/), 0.85), [...base, ...colorWords(feat).join(' ').split(' ')], base], 24);
+        } else {
+          status.textContent = 'جارٍ المقارنة البصرية مع خامات المكتبات… (أول مرة أبطأ، ثم تُحفظ البصمات على جهازك)';
+          pool = await poolFor(CAT_WORDS.map(c => tagCat(c.split(' '), c)), 14);
         }
-      } catch (e) { cands.innerHTML = ''; cands.append(h('p', { class: 'note err' }, e.message)); }
+        const ranked = (await rank(feat, pool, { onProgress: (p) => status.textContent = `جارٍ المقارنة البصرية… ${Math.round(p * 100)}%` })).map(r => ({ ...r, d: r.d * (r.m._w || 1) })).sort((a, b) => a.d - b.d);
+        if (!ranked.length) { status.textContent = 'لم أجد مرشحين. استخدم تبويب «البحث في المكتبة».'; return; }
+        // تقدير نوع الخامة من أقرب النتائج (في الوضع المحلي)، مع إمكانية تغييره
+        if (!picker.isAi) {
+          const votes = {}; ranked.slice(0, 6).forEach((r, i) => { if (r.m._cat) votes[r.m._cat] = (votes[r.m._cat] || 0) + (6 - i) ** 2; });
+          const top = Object.entries(votes).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]);
+          info.textContent = top.length ? 'تبدو أقرب إلى: ' + top.map(c => CATS.find(x => x[0] === c)?.[1]).join('، ') : '';
+          chips.innerHTML = ''; chips.append(h('span', { class: 'muted', style: { alignSelf: 'center' } }, 'النوع:'));
+          const all = h('button', { type: 'button', class: 'on' }, 'الأقرب بصريًا');
+          const btns = [all];
+          all.onclick = () => { btns.forEach(b => b.classList.remove('on')); all.classList.add('on'); meta.category = ''; show(ranked); };
+          chips.append(all);
+          for (const [v, t] of CATS.filter(c => c[0])) {
+            const b = h('button', { type: 'button' }, t); btns.push(b);
+            b.onclick = async () => {
+              btns.forEach(x => x.classList.remove('on')); b.classList.add('on'); meta.category = CAT_FROM[v] || '';
+              status.textContent = 'جارٍ البحث في هذا النوع…';
+              const more = await poolFor([tagCat(v.split(' '), v), tagCat([...v.split(' '), ...colorWords(feat).join(' ').split(' ')], v)], 40);
+              const r2 = await rank(feat, more); status.textContent = `أقرب خامات «${t}» بصريًا للجزء المحدد:`; show(r2, v); finish(r2[0] ? similarity(r2[0].d) : 0);
+            };
+            chips.append(b);
+          }
+        }
+        status.textContent = picker.isAi ? 'نتائج البحث مرتبة حسب القرب البصري من الجزء المحدد (النسبة تقديرية):' : 'أقرب الخامات بصريًا للجزء المحدد (النسبة تقديرية). اختر النوع لتدقيق النتائج:';
+        show(ranked); finish(similarity(ranked[0].d));
+      } catch (e) { status.textContent = ''; status.append(h('span', { class: 'note err' }, e.message)); }
     })();
     return row;
-  };
+  }
+
+  // تحليل اللقطة كاملة بالذكاء الاصطناعي: يُعيد قائمة الخامات مع مستطيل لكل خامة، فتُضاف كتحديدات
+  async function analyzeFull() {
+    if (!picker.isAi) { toast('اختر Gemini أو Claude من «طريقة المعالجة» أعلاه أولًا.', true); return; }
+    fullAiBtn.disabled = true; const info = h('p', { class: 'muted center' }, 'جارٍ تحليل اللقطة والتعرّف على خاماتها…'); shotResults.prepend(info);
+    try {
+      const d = (await vision('shot', shotImg, { provider: picker.value, maxSide: 1600 })).data || {};
+      try { sessionStorage.setItem('itq-shot', JSON.stringify(d.shot || {})); } catch { }
+      const s = d.shot || {}; info.remove();
+      shotResults.prepend(h('div', { class: 'note info' }, `نوع اللقطة: ${s.type === 'exterior' ? 'خارجية' : 'داخلية'} — الوقت: ${({ day: 'نهار', sunset: 'غروب', night: 'ليل', overcast: 'غائم' })[s.time] || '—'}. ${s.lighting_ar || ''} يمكنك تجهيز إضاءتها من أداة «الإضاءة وإعدادات الريندر».`));
+      for (const mat of (d.materials || []).slice(0, 12)) {
+        const b = Array.isArray(mat.box) && mat.box.length === 4 ? mat.box.map(Number) : null;
+        if (b && b.every(v => v >= 0 && v <= 1) && b[2] > 0.01 && b[3] > 0.01) {
+          const sel = rectMask(A, b[0] * A.w, b[1] * A.h, b[2] * A.w, b[3] * A.h); sel.preset = mat; sels.push(sel);
+          shotResults.append(presetRow(sel, sels.length - 1, mat));
+        } else shotResults.append(presetRow(null, -1, mat));
+      }
+      paintOverlay();
+    } catch (e) { info.remove(); shotResults.prepend(h('div', { class: 'note err' }, e.message)); }
+    fullAiBtn.disabled = false;
+  }
+  // صف خامة من التحليل الكامل: بحث بالكلمات ثم ترتيب بصري إن وُجد مستطيلها
+  function presetRow(sel, idx, mat) {
+    const col = idx >= 0 ? COLORS[idx % COLORS.length] : '#94a3b8';
+    const meta = { category: mat.category, finish: mat.finish, metal: mat.metal, name_ar: mat.name_ar };
+    const grid = h('div', { class: 'rs-grid small' }, h('p', { class: 'muted' }, 'جارٍ البحث والمقارنة…')), extra = h('div', { class: 'rs-row' });
+    const row = h('div', { class: 'panel rs-mat', style: { borderInlineStart: `5px solid ${col}` } },
+      h('div', { class: 'rs-mat-head' }, h('b', {}, (idx >= 0 ? `${idx + 1}. ` : '') + (mat.name_ar || '')), h('span', { class: 'rs-src' }, mat.where_ar || ''), h('span', { class: 'rs-src' }, CAT_AR[mat.category] || '')), grid, extra);
+    (async () => {
+      try {
+        const kw = [...new Set((mat.keywords || []).flatMap(k => String(k).toLowerCase().split(/\s+/)))], base = (CAT_EN[mat.category] || '').split(' ').filter(Boolean);
+        const pool = await poolFor([kw, [...base, ...String(mat.color || '').toLowerCase().split(/\s+/)].filter(Boolean), base].filter(w => w.length), 20);
+        const feat = sel ? regionFeatures(shotImg, A, sel) : null;
+        const ranked = feat ? await rank(feat, pool) : pool.map(m => ({ m, d: NaN }));
+        grid.innerHTML = '';
+        ranked.slice(0, 8).forEach(({ m, d }) => grid.append(card(m, meta, null, Number.isFinite(d) ? similarity(d) : null)));
+        if (!ranked.length) grid.append(h('p', { class: 'muted' }, 'لا توجد نتائج.'));
+        if (sel) { const tm = h('button', { class: 'btn light sm', type: 'button' }, ico('layers', 16), 'تحويل هذا الجزء إلى خرائط'); tm.onclick = () => { window.__itqPendingTexture = cropOf(sel, 0); location.hash = '#/tool/tex-maps'; }; extra.append(tm); }
+        const genBtn = h('button', { class: 'btn light sm', type: 'button' }, ico('sparkles', 16), 'توليدها بالذكاء الاصطناعي'); genBtn.onclick = () => generate(mat, meta, genBtn); extra.append(genBtn);
+      } catch (e) { grid.innerHTML = ''; grid.append(h('p', { class: 'note err' }, e.message)); }
+    })();
+    return row;
+  }
 
   // توليد خامة بالذكاء الاصطناعي ثم استخراج خرائطها على الجهاز
   const generate = async (mat, meta, btn) => {
@@ -191,59 +325,15 @@ export function renderMaterials(body) {
     btn.disabled = false; btn.lastChild.textContent = old;
   };
 
-  /* ---------- وضع «على جهازك»: مطابقة بصرية دون ذكاء اصطناعي ---------- */
-  // بصمة الصورة: متوسط اللون (Lab) والتباين وكثافة الحواف
-  const signature = (src, box) => {
-    const S = 96, c = document.createElement('canvas'); c.width = c.height = S;
-    const x = c.getContext('2d', { willReadFrequently: true });
-    const [sx, sy, sw, sh] = box || [0, 0, src.width, src.height];
-    x.drawImage(src, sx, sy, sw, sh, 0, 0, S, S);
-    const d = x.getImageData(0, 0, S, S).data; let r = 0, g = 0, b = 0; const L = new Float32Array(S * S);
-    for (let i = 0; i < S * S; i++) { r += d[i * 4]; g += d[i * 4 + 1]; b += d[i * 4 + 2]; L[i] = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2]; }
-    const n = S * S; r /= n; g /= n; b /= n;
-    let mean = 0; for (const v of L) mean += v; mean /= n; let vr = 0, ed = 0;
-    for (let i = 0; i < n; i++) { vr += (L[i] - mean) ** 2; if (i % S && i > S) ed += Math.abs(L[i] - L[i - 1]) + Math.abs(L[i] - L[i - S]); }
-    return { r, g, b, lum: mean, con: Math.sqrt(vr / n), edge: ed / n };
-  };
-  const colorWords = (s) => {
-    const mx = Math.max(s.r, s.g, s.b), mn = Math.min(s.r, s.g, s.b), sat = mx ? (mx - mn) / mx : 0;
-    if (sat < 0.12) return [s.lum > 190 ? 'white' : s.lum < 60 ? 'black' : 'grey'];
-    let hue = 0; const d = mx - mn;
-    if (mx === s.r) hue = ((s.g - s.b) / d) % 6; else if (mx === s.g) hue = (s.b - s.r) / d + 2; else hue = (s.r - s.g) / d + 4; hue *= 60; if (hue < 0) hue += 360;
-    if (hue < 20 || hue >= 340) return ['red']; if (hue < 50) return s.lum > 170 ? ['beige'] : ['brown']; if (hue < 70) return ['yellow']; if (hue < 170) return ['green']; if (hue < 260) return ['blue']; return ['purple'];
-  };
-  const dist = (a, b) => Math.hypot((a.r - b.r) / 2.2, (a.g - b.g) / 2.2, (a.b - b.b) / 2.2, (a.con - b.con) * 1.4, (a.edge - b.edge) * 2.5);
-  const thumbSig = async (m) => {
-    try { const r = await smartFetch(m.thumb); const bmp = await createImageBitmap(await r.blob()); return signature(bmp); } catch { return null; }
-  };
-  async function localMatch(typeWord) {
-    shotResults.innerHTML = '';
-    const sig = signature(shotImg, [shotImg.width * 0.15, shotImg.height * 0.15, shotImg.width * 0.7, shotImg.height * 0.7]);
-    const words = [...(typeWord ? typeWord.split(' ') : []), ...colorWords(sig)];
-    const typeChips = h('div', { class: 'rs-chips' }, h('span', { class: 'muted', style: { alignSelf: 'center' } }, 'ما نوع الخامة؟'),
-      CATS.filter(c => c[0]).map(([v, t]) => h('button', { type: 'button', class: v === typeWord ? 'on' : '', onclick: () => localMatch(v) }, t)));
-    const toMaps = h('button', { class: 'btn light sm', type: 'button', onclick: () => { window.__itqPendingTexture = shotImg; location.hash = '#/tool/tex-maps'; } }, ico('layers', 16), 'تحويل هذه الصورة نفسها إلى خرائط');
-    const grid = h('div', { class: 'rs-grid' }, h('p', { class: 'muted' }, 'جارٍ البحث عن أقرب الخامات بصريًا…'));
-    shotResults.append(h('div', { class: 'note info' }, 'وضع «على جهازك»: يُحلَّل لون الصورة وملمسها على جهازك وتُرتَّب خامات المكتبة حسب قربها منها، دون ذكاء اصطناعي. اختر نوع الخامة لتدقيق النتائج.'),
-      typeChips, h('div', { class: 'rs-row' }, toMaps), grid);
-    try {
-      let cands = await searchMaterials('', { words, limit: 40 });
-      if (cands.length < 8 && typeWord) cands = await searchMaterials('', { words: typeWord.split(' '), limit: 40 });
-      const sigs = await Promise.all(cands.map(thumbSig));
-      const ranked = cands.map((m, i) => ({ m, d: sigs[i] ? dist(sig, sigs[i]) : 1e9 })).sort((a, b) => a.d - b.d).slice(0, 12);
-      grid.innerHTML = '';
-      if (!ranked.length) grid.append(h('p', { class: 'muted' }, 'لا توجد نتائج. اختر نوع الخامة أو استخدم تبويب «البحث في المكتبة».'));
-      ranked.forEach(({ m }) => grid.append(card(m, { category: typeWord ? (CAT_FROM[typeWord] || '') : '' })));
-    } catch (e) { grid.innerHTML = ''; grid.append(h('p', { class: 'note err' }, e.message)); }
-  }
-
   const shotDz = dropzone({ accept: 'image/*', multiple: false, label: 'اختر صورة الشوت', hint: 'صورة ريندر أو صورة واقعية للمشروع (JPG أو PNG)', onFiles: async ([f]) => {
     const url = URL.createObjectURL(f); const img = new Image(); img.src = url; await img.decode();
-    const c = document.createElement('canvas'); const s = Math.min(1, 2000 / Math.max(img.width, img.height)); c.width = img.width * s; c.height = img.height * s; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    shotImg = c; shotPreview.innerHTML = ''; shotPreview.append(h('img', { src: url, alt: 'صورة الشوت' }), h('button', { class: 'btn sm', type: 'button', onclick: analyze }, ico('wand-sparkles', 16), 'تحليل اللقطة من جديد'));
-    analyze();
+    const c = document.createElement('canvas'); const s = Math.min(1, 2000 / Math.max(img.width, img.height)); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    shotImg = c; A = analysisCanvas(c, 480); sels = []; shotResults.innerHTML = '';
+    view.width = over.width = Math.min(1100, c.width); view.height = over.height = Math.round(c.height * view.width / c.width);
+    view.getContext('2d').drawImage(c, 0, 0, view.width, view.height); paintOverlay();
+    shotTools.classList.remove('hidden');
   } });
-  const shotTab = h('div', {}, picker.el, shotDz, shotPreview, shotResults);
+  const shotTab = h('div', {}, picker.el, shotDz, shotPreview, shotTools, shotResults);
 
   /* ---------- التبويبات ---------- */
   const tabs = h('div', { class: 'tabs' });

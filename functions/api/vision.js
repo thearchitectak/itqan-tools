@@ -65,9 +65,25 @@ const TASKS = {
 - keywords: من 3 إلى 6 كلمات إنجليزية للبحث في مكتبات الخامات (مثل: white marble polished veined).
 - color: اللون الغالب بالإنجليزية، finish: "matte" أو "satin" أو "glossy"، metal: true أو false.
 - tile_m: الطول التقريبي بالمتر لوحدة النقشة المتكررة إن أمكن تقديره (مثل حجم البلاطة أو عرض لوح الخشب)، وإلا null.
+- box: مستطيل داخل مساحة واضحة من هذه الخامة نفسها فقط (دون حواف أو ظلال أو عناصر أخرى)، بإحداثيات نسبية من 0 إلى 1: [x, y, w, h] من أعلى يسار الصورة.
 ٣) hdri_keywords: كلمات إنجليزية تصف خريطة HDRI مناسبة لإضاءة اللقطة (مثل: clear sky midday, sunset warm, overcast soft, indoor studio).
 أعد JSON بهذه البنية تمامًا:
-{"shot": {"type": "interior", "time": "day", "lighting_ar": "", "hdri_keywords": [""]}, "materials": [{"name_ar": "", "where_ar": "", "category": "marble", "keywords": [""], "color": "", "finish": "glossy", "metal": false, "tile_m": null}]}`,
+{"shot": {"type": "interior", "time": "day", "lighting_ar": "", "hdri_keywords": [""]}, "materials": [{"name_ar": "", "where_ar": "", "category": "marble", "keywords": [""], "color": "", "finish": "glossy", "metal": false, "tile_m": null, "box": [0.1, 0.7, 0.2, 0.1]}]}`,
+  },
+  mat: {
+    maxTokens: 1500,
+    valid: () => true,
+    prompt: () => `[MAT]
+الصورة جزء مقصوص من لقطة إظهار معماري، ويظهر فيه سطح خامة واحدة اختارها المستخدم (قد يظهر حولها قليل من عناصر أخرى؛ ركّز على الخامة التي تغطي معظم الصورة).
+صف هذه الخامة بدقة بعين مهندس إظهار محترف، لغرض البحث عن أقرب خامة لها في مكتبات خامات PBR مثل Poly Haven و ambientCG:
+- name_ar: اسم الخامة بالعربية الفصحى بدقة (مثل: قماش بوكليه رمادي فاتح، خشب جوز بقشرة عرضية، رخام نيرو ماركينا).
+- category: واحدة فقط من: wood, floor_wood, marble, stone, concrete, plaster, paint, brick, tiles, ceramic, terrazzo, metal, fabric, leather, carpet, wallpaper, glass, plastic, asphalt, ground, grass, gravel, sand, roofing, other.
+- keywords: من 4 إلى 8 كلمات إنجليزية مرتبة من الأهم، تصف المادة ونوعها الدقيق ولونها ونقشتها وتشطيبها كما تُسمّى في مكتبات الخامات (مثل: walnut wood veneer dark grain).
+- alt_keywords: من 2 إلى 4 كلمات إنجليزية بديلة أعم، للبحث إن لم توجد الخامة الدقيقة.
+- color: اللون الغالب بالإنجليزية، finish: "matte" أو "satin" أو "glossy"، metal: true أو false.
+- pattern_ar: وصف قصير للنقشة أو الملمس بالعربية.
+أعد JSON بهذه البنية تمامًا:
+{"name_ar": "", "category": "fabric", "keywords": [""], "alt_keywords": [""], "color": "", "finish": "matte", "metal": false, "pattern_ar": ""}`,
   },
   table: {
     maxTokens: 8000,
