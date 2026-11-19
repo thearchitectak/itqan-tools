@@ -87,14 +87,39 @@ async function writePath(root, path, blob) {
 }
 
 // كاتب موحّد: folder (مجلد الجهاز) أو zip
+// في وضع المجلد: إذا رفض المتصفح اسم ملف ما (قيود الأمان في Chrome)، لا يتوقف الحفظ،
+// بل يُجمع الملف المرفوض ويُنزَّل في ملف ZIP صغير بمساره نفسه، مع ذكر اسمه للمستخدم.
 export function makeWriter(kind, root) {
-  if (kind === 'folder') return {
-    kind, async add(files) { for (const [p, b] of files) await writePath(root, p, b); },
-    async finish() { for (const [p, b] of rootFiles()) await writePath(root, p, b); return null; },
-  };
+  if (kind === 'folder') {
+    const rejected = [];
+    const put = async (p, b) => {
+      try { await writePath(root, p, b); }
+      catch (e) {
+        if (e && (e.name === 'TypeError' || e.name === 'NotAllowedError' || e.name === 'InvalidModificationError' || /not allowed|invalid/i.test(e.message || ''))) rejected.push([p, b, e.message || e.name]);
+        else throw e;
+      }
+    };
+    return {
+      kind, rejected,
+      async add(files) { for (const [p, b] of files) await put(p, b); },
+      async finish(name) {
+        for (const [p, b] of rootFiles()) await put(p, b);
+        if (rejected.length) {
+          console.warn('ITQAN: files rejected by the browser:', rejected.map(r => r[0] + ' — ' + r[2]));
+          const zip = new (await libs.jszip())();
+          for (const [p, b] of rejected) zip.file(`${ROOT_NAME}/${p}`, b);
+          download(await zip.generateAsync({ type: 'blob', compression: 'STORE' }), `${ROOT_NAME}_remaining_files.zip`);
+          const names = [...new Set(rejected.map(r => r[0].split('/').pop()))];
+          return { rejected: names };
+        }
+        return null;
+      },
+    };
+  }
   let zip = null;
   return {
-    kind, async add(files) { if (!zip) zip = new (await libs.jszip())(); for (const [p, b] of files) zip.file(`${ROOT_NAME}/${p}`, b); },
-    async finish(name) { if (!zip) return; for (const [p, b] of rootFiles()) zip.file(`${ROOT_NAME}/${p}`, b); const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' }); download(blob, name || `${ROOT_NAME}.zip`); },
+    kind, rejected: [],
+    async add(files) { if (!zip) zip = new (await libs.jszip())(); for (const [p, b] of files) zip.file(`${ROOT_NAME}/${p}`, b); },
+    async finish(name) { if (!zip) return null; for (const [p, b] of rootFiles()) zip.file(`${ROOT_NAME}/${p}`, b); const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' }); download(blob, name || `${ROOT_NAME}.zip`); return null; },
   };
 }

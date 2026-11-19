@@ -51,7 +51,8 @@ export function renderTexMaps(body) {
       const rw = +realW.value;
       const m = { src: 'user', id: 'u' + Date.now(), name: name.value || 'Custom Material', key: 'Custom_' + keyOf(name.value || 'Material'), size_m: rw > 0 ? [rw, rw] : null, license: 'صورة المستخدم' };
       const info = makeInfo(m, { category: cat.value, finish: fin.value, metal: metal.checked, name_ar: nameAr.value }, 'jpg', maps);
-      await w.add(await materialFiles(info, maps)); await w.finish(`${info.key}.zip`);
+      await w.add(await materialFiles(info, maps)); const r = await w.finish(`${info.key}.zip`);
+      if (r?.rejected) toast(`رفض المتصفح حفظ بعض الملفات مباشرة في المجلد، وعددها ${r.rejected.length} (${r.rejected.slice(0, 4).join('، ')}${r.rejected.length > 4 ? '…' : ''})، فنُزّلت في ملف ZIP صغير بالمسارات نفسها؛ فُكّه داخل مجلد المكتبة.`, true, 12000);
       status.textContent = dest.kind === 'folder' ? `حُفظت الخامة ${info.key} في «${dest.name}». شغّل ITQAN_Materials_Setup.ms في ماكس لتظهر في مكتبة ITQAN.` : 'نُزّل ملف ZIP بالخامة.';
     } catch (e) { toast('تعذّر الحفظ: ' + e.message, true); }
     saveBtn.disabled = false;

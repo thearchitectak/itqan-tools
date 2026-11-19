@@ -104,7 +104,8 @@ export function renderLighting(body) {
       for (const r of rends) files.push([`Scripts/ITQAN_Render_${scene}_${r === 'corona' ? 'Corona' : 'VRay'}.ms`, new Blob([BOM + renderScript({ renderer: r, scene, hdri: hdriPath, ies, width: wd, height: hg, quality: qSeg.value }).replace(/\r?\n/g, '\r\n')], { type: 'text/plain' })]);
       files.push([`Scripts/Lighting_Guide_${scene}.txt`, new Blob([BOM + lightGuide(scene, pickedHdri, ies, rends).replace(/\n/g, '\r\n')], { type: 'text/plain' })]);
       status.textContent = 'جارٍ الحفظ…';
-      await w.add(files); await w.finish(`ITQAN_Lighting_${scene}.zip`);
+      await w.add(files); const r = await w.finish(`ITQAN_Lighting_${scene}.zip`);
+      if (r?.rejected) toast(`رفض المتصفح حفظ بعض الملفات مباشرة في المجلد، وعددها ${r.rejected.length} (${r.rejected.slice(0, 4).join('، ')}${r.rejected.length > 4 ? '…' : ''})، فنُزّلت في ملف ZIP صغير بالمسارات نفسها؛ فُكّه داخل مجلد المكتبة.`, true, 12000);
       status.textContent = dest.kind === 'folder' ? `حُفظت الحزمة في «${dest.name}»: مجلدات Scripts و IES${hdriPath ? ' و HDRI' : ''}.` : 'نُزّل ملف ZIP بحزمة الإضاءة.';
     } catch (e) { console.error(e); toast('تعذّر التجهيز: ' + e.message, true); status.textContent = ''; }
     goBtn.disabled = false;

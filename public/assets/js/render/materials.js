@@ -91,7 +91,8 @@ export function renderMaterials(body) {
       } catch (e) { console.error(e); st.textContent = 'تعذّر التجهيز: ' + e.message; st.classList.add('bad'); }
     }
     try {
-      if (ok) await writer.finish(`${ROOT_NAME}_${new Date().toISOString().slice(0, 10)}.zip`);
+      const r = ok ? await writer.finish(`${ROOT_NAME}_${new Date().toISOString().slice(0, 10)}.zip`) : null;
+      if (r?.rejected) toast(`رفض المتصفح حفظ بعض الملفات مباشرة في المجلد، وعددها ${r.rejected.length} (${r.rejected.slice(0, 4).join('، ')}${r.rejected.length > 4 ? '…' : ''})، فنُزّلت في ملف ZIP صغير بالمسارات نفسها؛ فُكّه داخل مجلد المكتبة.`, true, 12000);
       if (ok) toast(dest === 'folder' ? `حُفظت ${ok} من ${cart.length} في مجلد «${root.name}». شغّل ITQAN_Materials_Setup.ms في ماكس لتحديث المكتبة.` : `نُزّل ملف ZIP يحوي ${ok} خامة.`, false, 8000);
     } catch (e) { toast('تعذّر الحفظ: ' + e.message, true); }
     goBtn.disabled = false;
