@@ -1,27 +1,29 @@
 import { DEFAULT_MODELS } from '../../public/assets/js/defaults.js';
 
 // استدعاء مزوّد الذكاء الاصطناعي المختار مع تفعيل البحث في الويب للحصول على أحدث بيانات السوق.
-export async function callAI(env, { provider, model, system, prompt, webSearch, maxTokens = 16000 }) {
+export async function callAI(env, { provider, model, system, prompt, webSearch, maxTokens = 16000, images = null, temperature = null }) {
   provider = provider || 'anthropic';
   if (env.AI_MOCK === '1' && env.AI_MOCK_FAIL_AT) { const st = prompt.includes('"executiveSummary"') ? 'summary' : prompt.includes('"equipment"') ? 'technical' : 'market'; if (env.AI_MOCK_FAIL_AT.split(',').includes(st)) throw aiError(provider, provider === 'gemini' ? 429 : 400, provider === 'gemini' ? 'quota exhausted' : 'Your credit balance is too low'); }
+  if (env.AI_MOCK === '1' && images) { if (env.AI_MOCK_DOWN && env.AI_MOCK_DOWN.split(',').includes(provider)) throw aiError(provider, provider === 'gemini' ? 429 : 400, provider === 'gemini' ? 'quota exhausted' : 'Your credit balance is too low'); return mockVision(prompt); }
   if (env.AI_MOCK === '1') { if (env.AI_MOCK_DOWN && env.AI_MOCK_DOWN.split(',').includes(provider)) throw aiError(provider, provider === 'gemini' ? 429 : 400, provider === 'gemini' ? 'Resource has been exhausted (e.g. check quota).' : 'Your credit balance is too low to access the Anthropic API.'); return mock(prompt); }
   model = model || DEFAULT_MODELS[provider];
-  if (provider === 'anthropic') return anthropic(env, model, system, prompt, webSearch, maxTokens);
-  if (provider === 'gemini') return gemini(env, model, system, prompt, webSearch, maxTokens);
+  if (provider === 'anthropic') return anthropic(env, model, system, prompt, webSearch, maxTokens, images, temperature);
+  if (provider === 'gemini') return gemini(env, model, system, prompt, webSearch, maxTokens, images, temperature);
   if (provider === 'openai') return openai(env, model, system, prompt, webSearch, maxTokens);
   throw new Error('مزوّد الذكاء الاصطناعي غير معروف.');
 }
 
-async function anthropic(env, model, system, prompt, webSearch, maxTokens) {
+async function anthropic(env, model, system, prompt, webSearch, maxTokens, images, temperature) {
   if (!env.ANTHROPIC_API_KEY) throw Object.assign(new Error('لم يُضبط مفتاح Claude.'), { code: 'nokey' });
-  const messages = [{ role: 'user', content: prompt }];
+  const content = images ? [...images.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.data } })), { type: 'text', text: prompt }] : prompt;
+  const messages = [{ role: 'user', content }];
   const sources = [];
   let text = '';
   for (let turn = 0; turn < 4; turn++) {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages, ...(webSearch ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }] } : {}) }),
+      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages, ...(temperature != null ? { temperature } : {}), ...(webSearch ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }] } : {}) }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw aiError('anthropic', r.status, data?.error?.message);
@@ -36,15 +38,15 @@ async function anthropic(env, model, system, prompt, webSearch, maxTokens) {
   return { text, sources };
 }
 
-async function gemini(env, model, system, prompt, webSearch, maxTokens) {
+async function gemini(env, model, system, prompt, webSearch, maxTokens, images, temperature) {
   if (!env.GEMINI_API_KEY) throw Object.assign(new Error('لم يُضبط مفتاح Gemini.'), { code: 'nokey' });
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [{ role: 'user', parts: [...(images || []).map(im => ({ inline_data: { mime_type: im.mime, data: im.data } })), { text: prompt }] }],
       ...(webSearch ? { tools: [{ google_search: {} }] } : {}),
-      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 },
+      generationConfig: { maxOutputTokens: maxTokens, temperature: temperature ?? 0.4 },
     }),
   });
   const data = await r.json().catch(() => ({}));
@@ -96,6 +98,16 @@ function mock(prompt) {
     summary: { executiveSummary: 'يظهر المشروع مؤشرات إيجابية.', verdict: 'مجدٍ', verdictReason: 'صافي القيمة الحالية موجبة.', marketingPlan: [{ channel: 'إنستغرام', action: 'حملات محلية', budgetShare: '40٪' }], risks: [{ risk: 'ارتفاع الإيجار', likelihood: 'متوسط', impact: 'مرتفع', mitigation: 'عقد طويل الأجل' }], successFactors: ['جودة المنتج'], recommendations: ['البدء بقائمة مختصرة'], nextSteps: ['اختيار الموقع'] },
   };
   return { text: JSON.stringify(D[m]), sources: [{ title: 'مصدر تجريبي', url: 'https://example.com' }] };
+}
+
+// وضع تجريبي لقراءة الصور: يعيد نتيجة ثابتة بحسب نوع المهمة
+function mockVision(prompt) {
+  if (prompt.includes('[OMR]')) {
+    const n = Number((prompt.match(/عدد الأسئلة: (\d+)/) || [])[1]) || 0;
+    return { text: JSON.stringify({ name: 'طالب تجريبي', id: '1001', answers: Array.from({ length: n }, (_, i) => ({ q: i + 1, a: i === 2 ? 'blank' : 'أ' })) }), sources: [] };
+  }
+  if (prompt.includes('[TABLE]')) return { text: JSON.stringify({ tables: [{ title: 'جدول تجريبي', rows: [['البند', 'الكمية', 'السعر'], ['أسمنت', '10', '250']] }] }), sources: [] };
+  return { text: JSON.stringify({ rtl: true, blocks: [{ type: 'heading', text: 'عنوان تجريبي' }, { type: 'paragraph', text: 'فقرة مستخرجة من صورة الصفحة.' }, { type: 'list', items: ['بند أول', 'بند ثانٍ'] }, { type: 'table', rows: [['أ', 'ب'], ['1', '2']] }] }), sources: [] };
 }
 
 // تصنيف أخطاء المزوّد: credit (نفد الرصيد) | quota (تجاوز الحصة) | auth (مفتاح غير صالح) | busy (ضغط مؤقت) | other

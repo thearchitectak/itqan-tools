@@ -79,3 +79,23 @@ export async function providerStatus(env, cfg, { probeNow = true } = {}) {
   if (cfg.feasibility.enabled === false) for (const k of Object.keys(out)) out[k] = { available: false, reason: 'disabled' };
   return out;
 }
+
+// حالة الذكاء الاصطناعي في الأدوات (المصحح وتحويل الملفات الممسوحة)، بإعدادات مستقلة عن دراسة الجدوى
+export async function toolsAiStatus(env, cfg, { probeNow = true } = {}) {
+  const a = cfg.aiTools || {};
+  const out = {};
+  for (const p of ['anthropic', 'gemini']) {
+    if (a.enabled === false || a.providers?.[p]?.enabled === false) { out[p] = { available: false, reason: 'disabled' }; continue; }
+    if (!env[keyName[p]] && env.AI_MOCK !== '1') { out[p] = { available: false, reason: 'nokey' }; continue; }
+    let down = null, ok = null;
+    if (env.ITQAN_KV) { try { down = await env.ITQAN_KV.get(`ai-down:${p}`, 'json'); ok = await env.ITQAN_KV.get(`ai-ok:${p}`); } catch { } }
+    if (down) { out[p] = { available: false, reason: down.code, resetAt: down.resetAt || null }; continue; }
+    if (!ok && probeNow && env.ITQAN_KV) {
+      const bad = await probe(env, p, cfg);
+      if (bad) { await markDown(env, p, bad); out[p] = { available: false, reason: bad }; continue; }
+      try { await env.ITQAN_KV.put(`ai-ok:${p}`, '1', { expirationTtl: OK_TTL[p] }); } catch { }
+    }
+    out[p] = { available: true, reason: null };
+  }
+  return out;
+}

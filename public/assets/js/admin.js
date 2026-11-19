@@ -50,14 +50,14 @@ const ta = (rows = 4) => h('textarea', { class: 'input', rows });
 const sw = (checked, on) => { const i = h('input', { type: 'checkbox', checked }); i.onchange = () => { on(i.checked); markDirty(); }; return h('label', { class: 'switch' }, i, h('span')); };
 const sel = (opts, v) => h('select', { class: 'input' }, opts.map(([a, b]) => h('option', { value: a, selected: a === v }, b)));
 
-const TABS = [['overview', 'نظرة عامة', 'gauge'], ['site', 'هوية الموقع', 'globe'], ['profile', 'الملف التعريفي والدعم', 'hand-heart'], ['tools', 'الأدوات المدمجة', 'layout-grid'], ['services', 'الخدمات الإضافية', 'plus'], ['feas', 'دراسة الجدوى', 'sparkles'], ['backup', 'النسخ الاحتياطي', 'save']];
+const TABS = [['overview', 'نظرة عامة', 'gauge'], ['site', 'هوية الموقع', 'globe'], ['profile', 'الملف التعريفي والدعم', 'hand-heart'], ['tools', 'الأدوات المدمجة', 'layout-grid'], ['services', 'الخدمات الإضافية', 'plus'], ['eng', 'الأدوات الهندسية', 'hard-hat'], ['aitools', 'الذكاء الاصطناعي في الأدوات', 'wand-sparkles'], ['feas', 'دراسة الجدوى', 'sparkles'], ['backup', 'النسخ الاحتياطي', 'save']];
 
 function render() {
   root.innerHTML = '';
   const side = h('div', { class: 'side' }, TABS.map(([id, t, ic]) => h('button', { class: id === tab ? 'on' : '', onclick: () => { tab = id; render(); } }, ico(ic, 18), t)),
     h('button', { onclick: async () => { await api('/api/admin/logout', { method: 'POST' }); location.reload(); } }, ico('log-out', 18), 'تسجيل الخروج'));
   const main = h('div');
-  ({ overview, site, profile, tools, services, feas, backup })[tab](main);
+  ({ overview, site, profile, tools, services, eng, aitools, feas, backup })[tab](main);
   const saveBtn = h('button', { class: 'btn' }, ico('save', 18), 'حفظ التغييرات');
   saveBtn.onclick = async () => {
     saveBtn.disabled = true;
@@ -228,6 +228,52 @@ function services(m) {
   add.onclick = () => { const s = { id: Math.random().toString(36).slice(2, 9), title: 'خدمة جديدة', desc: '', icon: 'zap', color: '#495057', category: 'custom', type: 'html', html: '<!DOCTYPE html>\n<html lang="ar" dir="rtl">\n<head><meta charset="utf-8"><style>body{font-family:Tahoma,sans-serif;padding:24px}</style></head>\n<body>\n  <h2>خدمتي الجديدة</h2>\n  <p>اكتب هنا كود الأداة.</p>\n</body>\n</html>', enabled: true, order: 100 + list.length }; list.push(s); markDirty(); draw(); edit(s); };
   draw();
   m.append(h('div', { class: 'panel' }, h('div', { class: 'row' }, h('h2', { style: { margin: 0 } }, 'الخدمات الإضافية'), h('span', { class: 'spacer' }), add), h('p', { class: 'muted' }, 'أضف أدوات وخدمات جديدة تظهر في الصفحة الرئيسية مع الأدوات المدمجة.'), box), editor);
+}
+
+// إعدادات الأدوات الهندسية: الكود الافتراضي وأسعار المتر للتكلفة التقديرية
+function eng(m) {
+  const e = cfg.eng;
+  const rate = (k, title) => {
+    const r = e.costRates[k];
+    const n = (obj, key) => bind(inp({ type: 'number', min: 0, dir: 'ltr' }), obj, key, 'num');
+    return h('div', { class: 'panel' }, h('h3', { style: { marginTop: 0 } }, title),
+      h('div', { class: 'opts', style: { marginTop: 0 } },
+        field('العملة', bind(inp(), r, 'currency')), field('سعر متر العظم (هيكل ومبانٍ)', n(r, 'shell')),
+        field('إضافة التشطيب الاقتصادي للمتر', n(r.finish, 'economy')), field('إضافة التشطيب المتوسط للمتر', n(r.finish, 'standard')), field('إضافة التشطيب الفاخر للمتر', n(r.finish, 'lux'))));
+  };
+  m.append(
+    h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'الأدوات الهندسية'),
+      h('p', { class: 'muted' }, 'يمكنك تفعيل كل أداة أو إخفاؤها وتغيير ترتيبها من تبويب «الأدوات المدمجة».'),
+      h('div', { class: 'opts' },
+        field('الكود الافتراضي عند أول زيارة', bind(sel([['sa', 'الكود السعودي'], ['eg', 'الكود المصري'], ['intl', 'الكود العالمي']], e.defaultCode), e, 'defaultCode'), 'يستطيع الزائر تغييره من داخل أي أداة، ويُحفظ اختياره في متصفحه'),
+        field('ملاحظة الأسعار التي تظهر للزائر', bind(inp(), e, 'priceNote')))),
+    rate('eg', 'أسعار مصر (تظهر مع الكود المصري)'), rate('sa', 'أسعار السعودية (تظهر مع الكود السعودي)'),
+    h('div', { class: 'note info', style: { marginTop: '16px' } }, 'سعر المتر يُطبَّق على إجمالي مسطحات البناء. حدّث الأسعار دوريًا بحسب السوق.'));
+}
+
+function aitools(m) {
+  const a = cfg.aiTools;
+  const REASON = { credit: 'نفد الرصيد', quota: 'تجاوز الحصة المجانية', nokey: 'المفتاح غير مضبوط', auth: 'المفتاح غير صالح', disabled: 'متوقف' };
+  const KEYS = { anthropic: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY' };
+  const NAMES = { gemini: ['Gemini', 'مجاني بحصة يومية'], anthropic: ['Claude', 'الأدق، مدفوع'] };
+  const cells = {};
+  const rows = ['gemini', 'anthropic'].map(p => {
+    const o = a.providers[p]; const st = h('span', { class: 'muted' }, '…'); cells[p] = st;
+    return h('div', { class: 'list-row', style: { gridTemplateColumns: '150px 1fr 1.2fr auto' } },
+      h('div', {}, h('b', {}, NAMES[p][0]), h('div', { class: 'muted', style: { fontSize: '12px' } }, NAMES[p][1])),
+      st, bind(inp({ dir: 'ltr', placeholder: 'الافتراضي: ' + DEFAULT_MODELS[p] }), o, 'model'), sw(o.enabled !== false, v => o.enabled = v));
+  });
+  (async () => {
+    try { const d = await api('/api/vision'); for (const p of ['gemini', 'anthropic']) { const x = d.status[p], c = cells[p]; c.className = x.available ? 'ok-t' : 'no-t'; c.textContent = x.available ? 'متاح للمستخدمين' : 'غير متاح: ' + (REASON[x.reason] || x.reason) + (x.reason === 'nokey' ? ` (أضف ${KEYS[p]})` : ''); } }
+    catch { Object.values(cells).forEach(c => { c.textContent = 'تعذّر الفحص'; c.className = 'no-t'; }); }
+  })();
+  m.append(h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'الذكاء الاصطناعي في الأدوات'),
+    h('p', { class: 'muted' }, 'يظهر في الأدوات التالية خيار ثانٍ بجانب المعالجة على الجهاز: مصحح ورق التظليل (قارئ ثانٍ يؤكد القراءة ويقرأ اسم الطالب ورقمه)، وتحويل PDF إلى Word وإلى Excel (للملفات الممسوحة ضوئيًا). يستخدم مفاتيح Claude و Gemini نفسها المضبوطة لدراسة الجدوى، والمعالجة على الجهاز تبقى متاحة ومجانية دائمًا.'),
+    h('div', { class: 'opts' },
+      h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), a, 'enabled', 'bool'), 'إظهار خيار الذكاء الاصطناعي في الأدوات'),
+      h('label', { class: 'check' }, bind(h('input', { type: 'checkbox' }), a, 'autoFallback', 'bool'), 'الانتقال تلقائيًا إلى المزوّد الآخر إذا تعذّر المختار'),
+      field('الحد اليومي لكل مستخدم (عدد الصور أو الصفحات)', bind(inp({ type: 'number', min: 0 }), a, 'dailyImagesPerIp', 'num'), 'صفر = بلا حد. كل ورقة طالب أو صفحة PDF تُحسب صورة واحدة'))),
+    h('div', { class: 'panel' }, h('h2', { style: { marginTop: 0 } }, 'المزوّدون'), h('p', { class: 'muted' }, 'المزوّد الذي ينفد رصيده أو تنتهي حصته يظهر للمستخدم رماديًا ولا يمكن اختياره، ثم يُعاد فحصه تلقائيًا.'), ...rows));
 }
 
 function feas(m) {

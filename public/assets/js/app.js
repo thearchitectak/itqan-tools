@@ -1,6 +1,6 @@
 import { h, $, $$, ico, esc } from './ui.js';
 import { icon } from './icons.js';
-import { CATEGORIES, mergeConfig, resolveTools } from './defaults.js';
+import { CATEGORIES, GROUPS, groupOf, mergeConfig, resolveTools } from './defaults.js';
 import { profileCard, donationCard, socialIcons, hasDonation } from './profile.js';
 
 export let CONFIG = mergeConfig({});
@@ -33,12 +33,12 @@ function applyBranding() {
   const an = $('#announce');
   if (s.announcement) { an.textContent = s.announcement; an.classList.remove('hidden'); } else an.classList.add('hidden');
   const nav = $('#nav'); nav.innerHTML = '';
-  const links = [['#/', 'الرئيسية'], ['#/?c=organize', 'أدوات PDF'], ['#/?c=convert', 'التحويل']];
-  if (isOn('qr')) links.push(['#/tool/qr', 'رمز QR']);
-  if (isOn('feasibility')) links.push(['#/tool/feasibility', 'دراسة الجدوى']);
+  const links = [['#/', 'الرئيسية']];
+  for (const g of GROUPS) if (g.id !== 'more' && TOOLS.some(t => t.enabled && groupOf(t.category) === g.id)) links.push([`#/?g=${g.id}`, g.title]);
   if (hasDonation(CONFIG)) links.push(['#/support', 'ادعم المنصة']);
   for (const [href, t] of links) nav.append(h('a', { href }, t));
 }
+const ENG = ['loads', 'col-layout', 'col-design', 'footings', 'rebar', 'concrete', 'excavation', 'sizing', 'pipes', 'boq', 'build-cost', 'stairs', 'ramp-slope', 'openings', 'scale', 'units', 'coord-area', 'utm', 'leveling', 'pdf-compare', 'pdf-measure'];
 const isOn = (id) => TOOLS.find(t => t.id === id)?.enabled;
 
 function setTitle(t) { document.title = t ? `${t} — ${CONFIG.site.name}` : `${CONFIG.site.name} — ${CONFIG.site.tagline}`; }
@@ -51,25 +51,67 @@ function toolCard(t) {
     h('h3', {}, t.title), h('p', {}, t.desc));
 }
 
+const countLabel = n => (n === 1 ? 'أداة واحدة' : n === 2 ? 'أداتان' : `${n} ${n <= 10 ? 'أدوات' : 'أداة'}`);
+const OPEN_KEY = 'itq-open-groups';
+const readOpen = () => { try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch { return new Set(); } };
+const writeOpen = (set) => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); } catch { /* لا حفظ */ } };
+
 function renderHome(params) {
   setTitle('');
   const app = $('#app'); app.innerHTML = '';
   const s = CONFIG.site;
   const visible = TOOLS.filter(t => t.enabled);
-  const usedCats = CATEGORIES.filter(c => visible.some(t => t.category === c.id));
-  let cat = params.get('c') || 'all';
-  if (cat !== 'all' && !usedCats.some(c => c.id === cat)) cat = 'all';
-  const grid = h('div', { class: 'grid' });
-  const search = h('input', { class: 'search', type: 'search', placeholder: 'ابحث عن أداة…' });
-  const filters = h('div', { class: 'filters' });
+  // المجموعة المطلوبة من الرابط: ?g=eng أو ?c=civil (الروابط القديمة)
+  let want = params.get('g');
+  if (!want && params.get('c')) want = groupOf(params.get('c'));
+  const open = readOpen();
+  if (want) open.add(want);
+
+  const search = h('input', { class: 'search', type: 'search', placeholder: 'ابحث عن أي أداة…', 'aria-label': 'البحث عن أداة' });
+  const jump = h('div', { class: 'group-jump' });
+  const list = h('div', { class: 'groups' });
+  const groupEls = {};
+
   const draw = () => {
     const q = search.value.trim();
-    grid.innerHTML = '';
-    visible.filter(t => (cat === 'all' || t.category === cat) && (!q || (t.title + ' ' + t.desc).includes(q))).forEach(t => grid.append(toolCard(t)));
-    if (!grid.children.length) grid.append(h('p', { class: 'muted center', style: { gridColumn: '1/-1' } }, 'لا توجد أدوات مطابقة.'));
+    const match = t => !q || (t.title + ' ' + t.desc).includes(q);
+    list.innerHTML = ''; jump.innerHTML = '';
+    let any = false;
+    for (const g of GROUPS) {
+      const tools = visible.filter(t => groupOf(t.category) === g.id);
+      const shown = tools.filter(match);
+      if (!shown.length) continue;
+      any = true;
+      // أقسام المجموعة بترتيبها، ثم أي قسم غير معروف
+      const cats = [...g.cats, ...new Set(shown.map(t => t.category).filter(c => !g.cats.includes(c)))];
+      const body = h('div', { class: 'group-body' });
+      for (const cid of cats) {
+        const ct = shown.filter(t => t.category === cid);
+        if (!ct.length) continue;
+        const title = CATEGORIES.find(c => c.id === cid)?.title || 'أدوات أخرى';
+        body.append(h('div', { class: 'sub' }, h('h3', { class: 'sub-title' }, title, h('span', {}, ` (${ct.length})`)), h('div', { class: 'grid' }, ct.map(toolCard))));
+      }
+      const det = h('details', { class: 'group', id: 'g-' + g.id, style: `--g:${g.color}` },
+        h('summary', {},
+          h('span', { class: 'g-ic', html: icon(g.icon, 26) }),
+          h('span', { class: 'g-text' }, h('strong', {}, g.title), h('small', {}, g.desc)),
+          h('span', { class: 'g-count' }, countLabel(shown.length)),
+          h('span', { class: 'g-chev', html: icon('chevron-down', 22) })),
+        body);
+      det.open = !!q || open.has(g.id);
+      det.addEventListener('toggle', () => { if (q) return; det.open ? open.add(g.id) : open.delete(g.id); writeOpen(open); });
+      groupEls[g.id] = det;
+      list.append(det);
+      const chip = h('button', { type: 'button', style: `--g:${g.color}`, html: icon(g.icon, 16) + ' ' + esc(g.title) });
+      chip.onclick = () => { det.open = true; det.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      jump.append(chip);
+    }
+    if (!any) list.append(h('p', { class: 'muted center' }, 'لا توجد أدوات مطابقة.'));
+    const ctrl = h('div', { class: 'group-ctrl' });
+    const all = (v) => { Object.values(groupEls).forEach(d => { d.open = v; }); };
+    ctrl.append(h('button', { type: 'button', onclick: () => all(true) }, 'فتح الكل'), h('button', { type: 'button', onclick: () => all(false) }, 'طي الكل'));
+    if (any && !q) list.prepend(ctrl);
   };
-  const mkBtn = (id, title) => { const b = h('button', { class: cat === id ? 'on' : '' }, title); b.onclick = () => { cat = id; $$('button', filters).forEach(x => x.classList.remove('on')); b.classList.add('on'); draw(); }; return b; };
-  filters.append(mkBtn('all', 'جميع الأدوات'), ...usedCats.map(c => mkBtn(c.id, c.title)));
   search.oninput = draw;
   app.append(h('div', { class: 'container' },
     h('section', { class: 'hero' },
@@ -78,10 +120,11 @@ function renderHome(params) {
         h('span', { class: 'pill', html: icon('infinity', 16) + ' مجاني بالكامل' }),
         h('span', { class: 'pill', html: icon('shield-check', 16) + ' ملفاتك لا تغادر جهازك' }),
         h('span', { class: 'pill', html: icon('zap', 16) + ' دون تسجيل أو اشتراك' }))),
-    filters, search, grid));
+    search, jump, list));
   const pc = profileCard(CONFIG), dc = donationCard(CONFIG);
   if (pc || dc) app.firstChild.append(h('section', { class: 'about-row' + (pc && dc ? '' : ' single') }, pc, dc));
   draw();
+  if (want && groupEls[want]) setTimeout(() => groupEls[want].scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
 }
 
 function renderText(title, text) {
@@ -139,6 +182,8 @@ async function renderTool(id) {
   body.append(h('p', { class: 'center muted' }, 'جارٍ تجهيز الأداة…'));
   try {
     if (id === 'qr' || id === 'barcode') { const m = await import('./codes.js'); body.innerHTML = ''; (id === 'qr' ? m.renderQR : m.renderBarcode)(body, t); }
+    else if (ENG.includes(id)) { const m = await import('./eng/index.js'); body.innerHTML = ''; await m.renderEngTool(id, body); }
+    else if (id === 'omr') { const m = await import('./omr/omr.js'); body.innerHTML = ''; m.renderOmr(body, t); }
     else if (id === 'feasibility') { const m = await import('./feasibility.js'); body.innerHTML = ''; m.renderFeasibility(body, t, CONFIG); }
     else { const m = await import('./pdf-tools.js'); body.innerHTML = ''; m.renderPdfTool(id, body, t); }
   } catch (e) { console.error(e); body.innerHTML = ''; body.append(h('div', { class: 'note err' }, 'تعذّر تحميل الأداة: ' + e.message)); }

@@ -1,5 +1,6 @@
 // أدوات PDF — تعمل جميعها داخل المتصفح دون رفع الملفات إلى أي خادم.
 import { supportNudge } from './profile.js';
+import { aiPicker, vision } from './ai-tools.js';
 import { h, $, $$, ico, toast, fmtSize, libs, download, baseName, parseRanges, field, select, seg, dropzone, progressBar, readArrayBuffer, textToPng } from './ui.js';
 
 const PDF_ACCEPT = 'application/pdf,.pdf';
@@ -421,11 +422,15 @@ const TOOLS = {
     options() {
       const m = seg([['text', 'نص قابل للتحرير'], ['image', 'مطابق للشكل الأصلي']], 'text', v => hint.textContent = v === 'text' ? 'يستخرج النصوص في فقرات يمكنك تعديلها. لا يشمل الصور والجداول المعقدة.' : 'يضع كل صفحة صورةً في المستند فيبقى الشكل مطابقًا تمامًا، لكن النص لا يكون قابلًا للتحرير.');
       const hint = h('small', {}, 'يستخرج النصوص في فقرات يمكنك تعديلها. لا يشمل الصور والجداول المعقدة.');
-      return { el: h('div', { class: 'field', style: { gridColumn: '1/-1' } }, h('span', {}, 'نوع التحويل'), m, hint), get: () => ({ mode: m.value }) };
+      const kind = h('div', { class: 'field', style: { gridColumn: '1/-1' } }, h('span', {}, 'نوع التحويل'), m, hint);
+      const ai = aiPicker('pdf-to-word', { onChange: v => kind.classList.toggle('hidden', v !== 'local'), note: 'مناسب للملفات الممسوحة ضوئيًا: يقرأ النص العربي والإنجليزي والجداول ويحوّلها إلى نص قابل للتحرير.' });
+      kind.classList.toggle('hidden', ai.isAi);
+      return { el: [h('div', { style: { gridColumn: '1/-1' } }, ai.el), kind], get: () => ({ mode: ai.isAi ? 'ai' : m.value, provider: ai.value }) };
     },
-    note: 'الملفات الممسوحة ضوئيًا (صور بلا نص) تُحوَّل بوضع «مطابق للشكل الأصلي» فقط.',
+    note: 'الملفات الممسوحة ضوئيًا (صور بلا نص) تحتاج إلى القراءة بالذكاء الاصطناعي لتصبح نصًا قابلًا للتحرير، أو تُحوَّل بوضع «مطابق للشكل الأصلي».',
     async run(ctx, p) {
-      const docx = await libs.docx(); const f = ctx.files[0]; const src = await pdfjsDoc(await readArrayBuffer(f)); const mode = ctx.opts.get().mode;
+      const docx = await libs.docx(); const f = ctx.files[0]; const src = await pdfjsDoc(await readArrayBuffer(f)); const { mode, provider } = ctx.opts.get();
+      if (mode === 'ai') return [await aiToWord(docx, src, f, provider, p)];
       const sections = [];
       let totalText = 0;
       for (let i = 1; i <= src.numPages; i++) {
@@ -451,10 +456,15 @@ const TOOLS = {
 
   'pdf-to-excel': pdfCfg({
     action: 'تحويل إلى Excel',
-    options() { const m = seg([['sheets', 'كل صفحة في ورقة'], ['one', 'جميع الصفحات في ورقة واحدة']], 'sheets'); return { el: h('div', { class: 'field' }, h('span', {}, 'طريقة التوزيع'), m), get: () => ({ mode: m.value }) }; },
-    note: 'تعمل الأداة بأفضل صورة مع الجداول النصية الواضحة. الملفات الممسوحة ضوئيًا لا تحتوي على نص قابل للاستخراج.',
+    options() {
+      const m = seg([['sheets', 'كل صفحة في ورقة'], ['one', 'جميع الصفحات في ورقة واحدة']], 'sheets');
+      const ai = aiPicker('pdf-to-excel', { note: 'يتعرّف على الجداول في الملفات الممسوحة ضوئيًا والجداول المعقدة، ويضع كل جدول في ورقة.' });
+      return { el: [h('div', { style: { gridColumn: '1/-1' } }, ai.el), h('div', { class: 'field' }, h('span', {}, 'طريقة التوزيع'), m)], get: () => ({ mode: m.value, ai: ai.isAi, provider: ai.value }) };
+    },
+    note: 'على جهازك: تعمل الأداة بأفضل صورة مع الجداول النصية الواضحة. وللملفات الممسوحة ضوئيًا اختر القراءة بالذكاء الاصطناعي.',
     async run(ctx, p) {
-      const ExcelJS = await libs.exceljs(); const f = ctx.files[0]; const src = await pdfjsDoc(await readArrayBuffer(f)); const mode = ctx.opts.get().mode;
+      const ExcelJS = await libs.exceljs(); const f = ctx.files[0]; const src = await pdfjsDoc(await readArrayBuffer(f)); const { mode, ai, provider } = ctx.opts.get();
+      if (ai) return [await aiToExcel(ExcelJS, src, f, provider, mode, p)];
       const wb = new ExcelJS.Workbook(); let ws = null; let any = false;
       for (let i = 1; i <= src.numPages; i++) {
         p((i - 1) / src.numPages, `جارٍ معالجة الصفحة ${i} من ${src.numPages}`);
@@ -690,6 +700,77 @@ async function trimPng(bytes) {
   const pad = 6; const t = document.createElement('canvas'); t.width = x1 - x0 + pad * 2; t.height = y1 - y0 + pad * 2;
   t.getContext('2d').drawImage(c, x0 - pad, y0 - pad, t.width, t.height, 0, 0, t.width, t.height);
   return new Uint8Array(await (await new Promise(r => t.toBlob(r, 'image/png'))).arrayBuffer());
+}
+
+/* ============ التحويل بالذكاء الاصطناعي (للملفات الممسوحة ضوئيًا) ============ */
+
+const AI_MAX_PAGES = 30;
+async function aiPages(src, provider, task, p, onPage) {
+  const n = src.numPages;
+  if (n > AI_MAX_PAGES) throw new Error(`القراءة بالذكاء الاصطناعي تقبل ${AI_MAX_PAGES} صفحة على الأكثر في المرة الواحدة. قسّم الملف بأداة «تقسيم ملف PDF» أولًا.`);
+  for (let i = 1; i <= n; i++) {
+    p((i - 1) / n, `جارٍ قراءة الصفحة ${i} من ${n} بالذكاء الاصطناعي…`);
+    const page = await src.getPage(i), vp = page.getViewport({ scale: 1 });
+    const r = await renderPage(page, Math.min(3, 1800 / Math.max(vp.width, vp.height)), 'image/jpeg', 0.9);
+    let d;
+    try { d = await vision(task, r.canvas, { provider }); }
+    catch (e) { throw new Error(e.message + (e.unavailable || e.limit ? ' اختر «على جهازك» لإكمال التحويل دون ذكاء اصطناعي.' : '')); }
+    await onPage(d.data, i, page);
+  }
+}
+const cellNum = (c) => { const v = String(c ?? '').trim(); const n = v.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[,\s]/g, ''); return /^-?\d+(\.\d+)?$/.test(n) && n.length < 15 ? Number(n) : v; };
+const hasAr = (t) => /[\u0600-\u06FF]/.test(t);
+
+async function aiToWord(docx, src, f, provider, p) {
+  const { Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, LevelFormat, HeadingLevel } = docx;
+  const sections = [];
+  await aiPages(src, provider, 'ocr', p, async (d, i, page) => {
+    const vp = page.getViewport({ scale: 1 });
+    const W = Math.round(vp.width * 20), H = Math.round(vp.height * 20), M = 1000, inner = W - 2 * M;
+    const pageRtl = d.rtl !== false;
+    const para = (text, o = {}) => {
+      const rtl = hasAr(text) || (pageRtl && !/[A-Za-z]/.test(text));
+      return new Paragraph({ bidirectional: rtl, alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT, heading: o.heading, numbering: o.bullet ? { reference: 'bul', level: 0 } : undefined, spacing: { after: 100 },
+        children: [new TextRun({ text, rightToLeft: rtl, font: 'Arial', size: o.size || 24, sizeComplexScript: o.size || 24, bold: o.bold, boldComplexScript: o.bold })] });
+    };
+    const kids = [];
+    for (const b of Array.isArray(d.blocks) ? d.blocks : []) {
+      if (b.type === 'heading' && b.text) kids.push(para(String(b.text), { heading: HeadingLevel.HEADING_2, bold: true, size: 30 }));
+      else if (b.type === 'list' && Array.isArray(b.items)) b.items.forEach(t => t && kids.push(para(String(t), { bullet: true })));
+      else if (b.type === 'table' && Array.isArray(b.rows) && b.rows.length) {
+        const cols = Math.max(...b.rows.map(r => (Array.isArray(r) ? r.length : 0))); if (!cols) continue;
+        const cw = Math.floor(inner / cols), bd = { style: BorderStyle.SINGLE, size: 4, color: '999999' };
+        kids.push(new Table({ width: { size: cw * cols, type: WidthType.DXA }, columnWidths: Array(cols).fill(cw), visuallyRightToLeft: pageRtl,
+          rows: b.rows.filter(Array.isArray).map((r, ri) => new TableRow({ children: Array.from({ length: cols }, (_, ci) => new TableCell({ width: { size: cw, type: WidthType.DXA }, borders: { top: bd, bottom: bd, left: bd, right: bd },
+            children: [para(String(r[ci] ?? ''), { bold: ri === 0, size: 22 })] })) })) }));
+        kids.push(new Paragraph(''));
+      } else if (b.text) kids.push(para(String(b.text)));
+    }
+    sections.push({ properties: { page: { size: { width: W, height: H }, margin: { top: M, bottom: M, left: M, right: M } } }, children: kids.length ? kids : [new Paragraph('')] });
+  });
+  p(0.95, 'جارٍ إنشاء مستند Word…');
+  const blob = await docx.Packer.toBlob(new docx.Document({ creator: 'ITQAN Tools',
+    styles: { default: { document: { run: { font: 'Arial' } } }, paragraphStyles: [{ id: 'Heading2', name: 'Heading 2', basedOn: 'Normal', next: 'Normal', quickFormat: true, run: { font: 'Arial', size: 30, bold: true }, paragraph: { spacing: { before: 240, after: 120 }, keepNext: true, outlineLevel: 1 } }] },
+    numbering: { config: [{ reference: 'bul', levels: [{ level: 0, format: LevelFormat.BULLET, text: '•', alignment: AlignmentType.RIGHT, style: { paragraph: { indent: { left: 720, hanging: 360 } } } }] }] },
+    sections }));
+  return { name: baseName(f.name) + '.docx', blob };
+}
+
+async function aiToExcel(ExcelJS, src, f, provider, mode, p) {
+  const wb = new ExcelJS.Workbook(); let one = null, any = false;
+  await aiPages(src, provider, 'table', p, async (d, i) => {
+    const tables = (Array.isArray(d.tables) ? d.tables : []).filter(t => Array.isArray(t.rows) && t.rows.length);
+    tables.forEach((t, ti) => {
+      let ws;
+      if (mode === 'one') { ws = one = one || wb.addWorksheet('البيانات'); if (ws.rowCount) ws.addRow([]); if (t.title) ws.addRow([t.title]).font = { bold: true }; }
+      else ws = wb.addWorksheet((`صفحة ${i}` + (tables.length > 1 ? ` - جدول ${ti + 1}` : '')).slice(0, 31));
+      const rtl = t.rows.flat().some(c => hasAr(String(c ?? ''))); if (rtl) ws.views = [{ rightToLeft: true }];
+      t.rows.forEach((r, ri) => { if (!Array.isArray(r)) return; const row = ws.addRow(r.map(cellNum)); if (ri === 0) row.font = { bold: true }; any = true; });
+      ws.columns.forEach(c => c.width = 18);
+    });
+  });
+  if (!any) throw new Error('لم يعثر الذكاء الاصطناعي على جداول في الملف.');
+  return { name: baseName(f.name) + '.xlsx', blob: new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }) };
 }
 
 export function renderPdfTool(id, body, t) {
