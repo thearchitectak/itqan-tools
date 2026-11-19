@@ -18,7 +18,7 @@ function boxBlur(src, w, h, r) {
   }
   return out;
 }
-const blur = (a, w, h, r) => boxBlur(boxBlur(boxBlur(a, w, h, r), w, h, r), w, h, r); // تقريب Gaussian
+export const blur = (a, w, h, r) => boxBlur(boxBlur(boxBlur(a, w, h, r), w, h, r), w, h, r); // تقريب Gaussian
 
 function normalize(a, lo = 0.01, hi = 0.99) {
   const step = Math.max(1, Math.floor(a.length / 262144)), smp = new Float32Array(Math.ceil(a.length / step));
@@ -28,14 +28,16 @@ function normalize(a, lo = 0.01, hi = 0.99) {
   return a;
 }
 
-// جعل الصورة متكررة: مزج الصورة مع نسخة مزاحة بنصف الأبعاد بقناع ناعم عند الحواف
+// جعل الصورة متكررة: مزج الصورة مع نسخة مزاحة بنصف الأبعاد بقناع ناعم عند الحواف.
+// المزج «حافظ للتباين» (Variance-preserving): يمنع البقع الباهتة الضبابية التي يتركها المزج الخطي العادي.
 function makeSeamless(rgb, w, h, band = 0.18) {
   const out = new Float32Array(rgb.length), bw = Math.max(2, band * w), bh = Math.max(2, band * h);
   const sm = (t) => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
+  const mean = [0, 0, 0], N = w * h; for (let i = 0; i < N; i++) for (let k = 0; k < 3; k++) mean[k] += rgb[i * 3 + k]; for (let k = 0; k < 3; k++) mean[k] /= N;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const m = Math.min(sm(Math.min(x, w - 1 - x) / bw), sm(Math.min(y, h - 1 - y) / bh)); // 1 في الوسط، 0 عند الحواف
-    const i = (y * w + x) * 3, j = (((y + (h >> 1)) % h) * w + ((x + (w >> 1)) % w)) * 3;
-    for (let k = 0; k < 3; k++) out[i + k] = rgb[i + k] * m + rgb[j + k] * (1 - m);
+    const i = (y * w + x) * 3, j = (((y + (h >> 1)) % h) * w + ((x + (w >> 1)) % w)) * 3, nrm = 1 / Math.sqrt(m * m + (1 - m) * (1 - m));
+    for (let k = 0; k < 3; k++) { const v = mean[k] + ((rgb[i + k] - mean[k]) * m + (rgb[j + k] - mean[k]) * (1 - m)) * nrm; out[i + k] = v < 0 ? 0 : v > 1 ? 1 : v; }
   }
   return out;
 }

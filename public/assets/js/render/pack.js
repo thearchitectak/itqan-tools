@@ -2,7 +2,7 @@
 // ثم الحفظ في مجلد «مكتبة خامات إتقان» على الجهاز مباشرة، أو في ملف ZIP بالبنية نفسها.
 import { libs, download } from '../ui.js';
 import { materialScript, setupScript } from './maxscript.js';
-import { coronaGuide, vrayGuide, tipsText, readmeText } from './guides.js';
+import { coronaGuide, vrayGuide, tipsText, readmeText, imperfGuide } from './guides.js';
 
 export const ROOT_NAME = 'ITQAN_Materials';
 const BOM = '﻿';
@@ -43,14 +43,17 @@ async function previewOf(blob) {
 }
 
 // قائمة الملفات لخامة واحدة (المسارات نسبية إلى المجلد الرئيسي)
-export async function materialFiles(info, maps) {
+// imp (اختياري): { EnName: blob } طبقات العيوب، تُحفظ في مجلد Imperfections داخل مجلدي Corona و V-Ray
+export async function materialFiles(info, maps, imp) {
   const base = `Materials/${info.key}/`, out = [];
   for (const [r, sfx, folder] of [['corona', C_SFX, `${info.key}_Corona`], ['vray', V_SFX, `${info.key}_VRay`]]) {
     for (const k of info.maps) out.push([`${base}${folder}/${info.key}_${sfx[k]}.${info.ext}`, maps[k]]);
+    if (imp) for (const [en, b] of Object.entries(imp)) out.push([`${base}${folder}/Imperfections/${info.key}_Imp_${en}.jpg`, b]);
     out.push([`${base}${folder}/${info.key}_${r === 'corona' ? 'Corona' : 'VRay'}.ms`, ms(materialScript(info, r))]);
     out.push([`${base}${folder}/${r === 'corona' ? 'Setup_Guide_Corona' : 'Setup_Guide_VRay'}.txt`, txt(r === 'corona' ? coronaGuide(info) : vrayGuide(info))]);
   }
   out.push([`${base}Realism_Tips.txt`, txt(tipsText(info))]);
+  if (imp && Object.keys(imp).length) out.push([`${base}Imperfections_Guide.txt`, txt(imperfGuide(info))]);
   const ini = ['[material]', `key=${info.key}`, `title=${info.title.replace(/[^\x20-\x7e]/g, '')}`, `source=${info.source.replace(/[^\x20-\x7e]/g, '') || 'user'}`, `url=${info.url}`, `ext=${info.ext}`,
     `category=${info.category}`, `metal=${info.metal ? 1 : 0}`, `displace_cm=${info.displaceCm}`, `size_w_m=${info.sizeW || 0}`, `size_h_m=${info.sizeH || 0}`, `maps=${info.maps.join(',')}`].join('\r\n');
   out.push([`${base}material_info.txt`, new Blob([ini + '\r\n'], { type: 'text/plain' })]);

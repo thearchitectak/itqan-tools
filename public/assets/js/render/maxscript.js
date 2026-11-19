@@ -34,18 +34,75 @@ fn itq_vbitmap f linear =
 (
 	if f == undefined then return undefined
 	local cls = try (execute "VRayBitmap") catch undefined
-	if cls == undefined or not (isKindOf cls textureMapClass) then return itq_bitmap f linear
+	if cls == undefined or not ((classof cls == textureMapClass) or (isKindOf cls textureMapClass)) then return itq_bitmap f linear
 	local b = cls name:(getFilenameFile f)
 	itq_set b #HDRIMapName f
 	itq_set b #color_space (if linear then 0 else 2)
 	b
 )
-fn itq_hasClass n = (local c = try (execute n) catch undefined; c != undefined and (isKindOf c MaterialClass or isKindOf c textureMapClass))
+fn itq_hasClass n =
+(
+	-- most reliable test: actually create an instance (also triggers loading of deferred plugins)
+	local inst = try (execute (n + "()")) catch undefined
+	if inst != undefined and ((superclassof inst == material) or (superclassof inst == textureMap)) then return true
+	local c = try (execute n) catch undefined
+	if c != undefined and ((classof c == MaterialClass) or (classof c == textureMapClass) or (isKindOf c MaterialClass) or (isKindOf c textureMapClass)) then return true
+	local nl = toLower n
+	for k in material.classes where (toLower (k as string)) == nl do return true
+	for k in textureMap.classes where (toLower (k as string)) == nl do return true
+	false
+)
+fn itq_renderers = (local s = ""; for r in RendererClass.classes do s += (r as string) + "  "; s)
+-- 3ds Max 2025 may defer loading plugins until first use: creating a renderer instance loads Corona / V-Ray and their material classes
+global ITQ_WOKEN
+fn itq_wake =
+(
+	if ITQ_WOKEN == true then return true
+	ITQ_WOKEN = true
+	for r in RendererClass.classes do
+	(
+		local nm = r as string
+		if (matchPattern nm pattern:"*Corona*") or (matchPattern nm pattern:"*V_Ray*") do try (r()) catch (append ITQ_LOG ("could not load " + nm))
+	)
+	true
+)
+fn itq_classesLike pat = (local s = ""; for k in material.classes where matchPattern (k as string) pattern:pat do s += (k as string) + " "; s)
+fn itq_hasCorona = (itq_wake(); (itq_hasClass "CoronaPhysicalMtl") or (itq_hasClass "CoronaMtl") or (itq_hasClass "CoronaLegacyMtl"))
+fn itq_hasVRay = (itq_wake(); itq_hasClass "VRayMtl")
 
 -- Corona Physical Material (Corona 7 and newer)
+-- Legacy Corona Material (Corona 6 and older): glossiness workflow, so the roughness map is inverted
+fn itq_corona_legacy dir base ext isMetal dispCm =
+(
+	local m = if itq_hasClass "CoronaMtl" then (execute "CoronaMtl")() else (execute "CoronaLegacyMtl")()
+	m.name = "ITQAN_" + base
+	itq_set m #texmapDiffuse (itq_bitmap (itq_file dir base "BaseColor" ext) false)
+	itq_set m #levelReflect 1.0
+	itq_set m #fresnelIor (if isMetal then 999.0 else 1.5)
+	local r = itq_bitmap (itq_file dir base "Roughness" ext) true
+	if r != undefined do (try (r.output.invert = true) catch (); itq_set m #texmapReflectGlossiness r)
+	local nf = itq_file dir base "Normal" ext
+	if nf != undefined and (itq_hasClass "CoronaNormal") do
+	(
+		local n = (execute "CoronaNormal")()
+		itq_set n #normalMap (itq_bitmap nf true)
+		itq_set m #texmapBump n
+		itq_set m #mapamountBump 1.0
+	)
+	local op = itq_bitmap (itq_file dir base "Opacity" ext) true
+	if op != undefined do itq_set m #texmapOpacity op
+	if dispCm > 0 do
+	(
+		local h = itq_bitmap (itq_file dir base "Displacement" ext) true
+		if h != undefined do (itq_set m #texmapDisplace h; itq_set m #displacementMinimum 0.0; itq_set m #displacementMaximum (units.decodeValue ((dispCm as string) + "cm")))
+	)
+	m
+)
+
 fn itq_corona dir base ext isMetal dispCm =
 (
-	if not (itq_hasClass "CoronaPhysicalMtl") then return undefined
+	if not (itq_hasCorona()) then return undefined
+	if not (itq_hasClass "CoronaPhysicalMtl") then return (itq_corona_legacy dir base ext isMetal dispCm)
 	local m = (execute "CoronaPhysicalMtl")()
 	m.name = "ITQAN_" + base
 	itq_set m #baseTexmap (itq_bitmap (itq_file dir base "BaseColor" ext) false)
@@ -76,10 +133,49 @@ fn itq_corona dir base ext isMetal dispCm =
 	m
 )
 
+-- Imperfection layers (dirt, dust, scratches...): standard 3ds Max Mix maps, so they work with Corona and V-Ray.
+fn itq_mix base col maskFile amt tile =
+(
+	if maskFile == undefined or amt <= 0 then return base
+	local mk = itq_bitmap maskFile true
+	if mk == undefined then return base
+	try (mk.coords.U_Tiling = tile; mk.coords.V_Tiling = tile) catch ()
+	try (mk.output.output_amount = amt) catch ()
+	local mx = try (Mix()) catch undefined
+	if mx == undefined then return base
+	mx.name = "ITQ_" + (getFilenameFile maskFile)
+	if base != undefined then itq_set mx #map1 base else itq_set mx #color1 (color 128 128 128)
+	itq_set mx #color2 col
+	itq_set mx #mask mk
+	mx
+)
+fn itq_imperf m isC dir base layers =
+(
+	local legacy = ((classof m as string) == "CoronaMtl") or ((classof m as string) == "CoronaLegacyMtl")
+	local cprop = if legacy then #texmapDiffuse else if isC then #baseTexmap else #texmap_diffuse
+	local rprop = if legacy then #texmapReflectGlossiness else if isC then #baseRoughnessTexmap else #texmap_reflectionGlossiness
+	local rough = if legacy then (color 0 0 0) else (color 255 255 255)
+	local c = try (getProperty m cprop) catch undefined
+	local r = try (getProperty m rprop) catch undefined
+	local n = 0
+	for L in layers do
+	(
+		local f = itq_file (dir + "Imperfections\\") base ("Imp_" + L[1]) "jpg"
+		if f != undefined do
+		(
+			if L[2] != undefined and L[3] > 0 do c = itq_mix c L[2] f L[3] L[5]
+			if L[4] > 0 do r = itq_mix r rough f L[4] L[5]
+			n += 1
+		)
+	)
+	if n > 0 do (itq_set m cprop c; itq_set m rprop r)
+	n
+)
+
 -- V-Ray Material (V-Ray 5 and newer): GGX + roughness workflow
 fn itq_vray dir base ext isMetal dispCm =
 (
-	if not (itq_hasClass "VRayMtl") then return undefined
+	if not (itq_hasVRay()) then return undefined
 	local m = (execute "VRayMtl")()
 	m.name = "ITQAN_" + base
 	itq_set m #texmap_diffuse (itq_vbitmap (itq_file dir base "Diffuse" ext) false)
@@ -141,6 +237,14 @@ fn itq_report =
 const num = (v) => (Number.isFinite(+v) ? (+v).toFixed(3).replace(/\.?0+$/, '') : '0');
 
 // سكربت خامة واحدة (يوضع داخل مجلد Corona أو VRay للخامة)
+// سطر تركيب طبقات العيوب المختارة (اللون والخشونة؛ البروز يُشرح يدويًا في الدليل)
+function impLine(info, isC) {
+  const L = (info.imperf || []).filter(l => l.auto);
+  if (!L.length) return '';
+  const col = (c) => c ? `(color ${c.map(Math.round).join(' ')})` : 'undefined';
+  const arr = L.map(l => `#("${l.en}", ${col(l.color)}, ${num(+(l.colorAmt || 0).toFixed(3))}, ${num(+(l.roughAmt || 0).toFixed(3))}, ${num(+l.tile.toFixed(3))})`).join(', ');
+  return `\tif m != undefined do itq_imperf m ${isC ? 'true' : 'false'} dir "${info.key}" #(${arr})\n`;
+}
 export function materialScript(info, renderer) {
   const isC = renderer === 'corona';
   const fn = isC ? 'itq_corona' : 'itq_vray';
@@ -155,7 +259,7 @@ ${CORE_MS}
 	ITQ_LOG = #()
 	local dir = getFilenamePath (getThisScriptFilename())
 	local m = ${fn} dir "${info.key}" "${info.ext}" ${info.metal ? 'true' : 'false'} ${num(info.displaceCm)}
-	if m == undefined then messageBox "${rName} is not installed or not loaded in this 3ds Max session." title:"ITQAN Tools"
+${impLine(info, isC)}	if m == undefined then messageBox "${rName} is not installed or not loaded in this 3ds Max session." title:"ITQAN Tools"
 	else
 	(
 		try (meditMaterials[activeMeditSlot] = m) catch ()
@@ -180,6 +284,26 @@ export function setupScript() {
 ${CORE_MS}
 fn itq_ini f k d = (local v = getINISetting f "material" k; if v == "" then d else v)
 
+-- ملاحظة: MAXScript لا يفرّق بين الحروف الكبيرة والصغيرة، فلا يجوز أن يطابق اسمُ متغير اسمَ دالة
+global ITQ_SUMMARY = ""
+-- حفظ مكتبة: الطريقة الأولى saveTempMaterialLibrary، والاحتياطية عبر المكتبة الحالية saveMaterialLibrary
+fn itq_saveLib mats f =
+(
+	if mats.count == 0 then return false
+	try (local ml = materialLibrary(); for m in mats do append ml m; saveTempMaterialLibrary ml f) catch (append ITQ_LOG ("saveTempMaterialLibrary: " + (getCurrentException())))
+	if not (doesFileExist f) do
+	(
+		try
+		(
+			while currentMaterialLibrary.count > 0 do deleteItem currentMaterialLibrary 1
+			for m in mats do append currentMaterialLibrary m
+			saveMaterialLibrary f
+		)
+		catch (append ITQ_LOG ("saveMaterialLibrary: " + (getCurrentException())))
+	)
+	doesFileExist f
+)
+
 fn itq_sync root force =
 (
 	ITQ_LOG = #()
@@ -190,35 +314,58 @@ fn itq_sync root force =
 	local syncIni = root + "ITQAN_sync.ini"
 	local hasLib = (doesFileExist (root + "ITQAN_Corona.mat")) or (doesFileExist (root + "ITQAN_VRay.mat"))
 	if (not force) and hasLib and ((getINISetting syncIni "sync" "stamp") == stamp) then return -1
-	local libC = materialLibrary()
-	local libV = materialLibrary()
+	local libC = #()
+	local libV = #()
+	local hasC = itq_hasCorona()
+	local hasV = itq_hasVRay()
+	local noInfo = 0
 	for d in dirs do
 	(
 		local ini = d + "material_info.txt"
 		if not (doesFileExist ini) do ini = d + "material.ini"
-		if doesFileExist ini do
+		local key = ""
+		local ext = "jpg"
+		local isMetal = false
+		local disp = 0.0
+		if doesFileExist ini then
 		(
-			local key = itq_ini ini "key" ""
-			local ext = itq_ini ini "ext" "jpg"
-			local isMetal = (itq_ini ini "metal" "0") == "1"
-			local disp = (itq_ini ini "displace_cm" "0") as float
+			key = itq_ini ini "key" ""
+			ext = itq_ini ini "ext" "jpg"
+			isMetal = (itq_ini ini "metal" "0") == "1"
+			disp = (itq_ini ini "displace_cm" "0") as float
 			if disp == undefined do disp = 0.0
-			if key != "" do
+		)
+		else
+		(
+			-- no info file (saved by an older version): infer from the map files themselves
+			noInfo += 1
+			key = filenameFromPath (trimRight d "\\\\")
+			ext = ""
+			for e in #("jpg", "png", "exr", "tif") where ext == "" do
+				if (doesFileExist (d + key + "_Corona\\\\" + key + "_BaseColor." + e)) or (doesFileExist (d + key + "_VRay\\\\" + key + "_Diffuse." + e)) do ext = e
+			if ext == "" then (append ITQ_LOG ("No maps found in " + d); key = "")
+			else
 			(
-				local mc = itq_corona (d + key + "_Corona\\\\") key ext isMetal disp
-				if mc != undefined do append libC mc
-				local mv = itq_vray (d + key + "_VRay\\\\") key ext isMetal disp
-				if mv != undefined do append libV mv
+				isMetal = doesFileExist (d + key + "_Corona\\\\" + key + "_Metalness." + ext)
+				if doesFileExist (d + key + "_Corona\\\\" + key + "_Displacement." + ext) do disp = 1.0
 			)
 		)
+		if key != "" do
+		(
+			local mc = try (itq_corona (d + key + "_Corona\\\\") key ext isMetal disp) catch (append ITQ_LOG ("Corona " + key + ": " + (getCurrentException())); undefined)
+			if mc != undefined do append libC mc
+			local mv = try (itq_vray (d + key + "_VRay\\\\") key ext isMetal disp) catch (append ITQ_LOG ("V-Ray " + key + ": " + (getCurrentException())); undefined)
+			if mv != undefined do append libV mv
+		)
 	)
-	if libC.count > 0 do saveTempMaterialLibrary libC (root + "ITQAN_Corona.mat")
-	if libV.count > 0 do saveTempMaterialLibrary libV (root + "ITQAN_VRay.mat")
-	setINISetting syncIni "sync" "stamp" stamp
+	local okC = itq_saveLib libC (root + "ITQAN_Corona.mat")
+	local okV = itq_saveLib libV (root + "ITQAN_VRay.mat")
+	if okC or okV do setINISetting syncIni "sync" "stamp" stamp
 	local isV = matchPattern ((classof renderers.current) as string) pattern:"*V_Ray*"
 	local lf = root + (if isV then "ITQAN_VRay.mat" else "ITQAN_Corona.mat")
 	if not (doesFileExist lf) do lf = root + (if isV then "ITQAN_Corona.mat" else "ITQAN_VRay.mat")
 	if doesFileExist lf do (try (loadMaterialLibrary lf) catch ())
+	ITQ_SUMMARY = "Material folders found: " + (dirs.count as string) + (if noInfo > 0 then " (" + (noInfo as string) + " read from file names)" else "") + "\\nCorona installed: " + (if hasC then "yes" else "NO") + " | Corona materials: " + (libC.count as string) + " | ITQAN_Corona.mat saved: " + (if okC then "yes" else "NO") + "\\nV-Ray installed: " + (if hasV then "yes" else "NO") + " | V-Ray materials: " + (libV.count as string) + " | ITQAN_VRay.mat saved: " + (if okV then "yes" else "NO") + (if (not hasC) or (not hasV) then "\\nRenderers loaded: " + (itq_renderers()) + "\\nCorona material classes: " + (itq_classesLike "*Corona*") + "\\nV-Ray material classes: " + (itq_classesLike "*VRay*") else "") + (if hasC and not (itq_hasClass "CoronaPhysicalMtl") then "\\n(Older Corona detected: using the legacy CoronaMtl)" else "") + (if ITQ_LOG.count > 0 then "\\n\\nNotes (" + (ITQ_LOG.count as string) + "): " + ITQ_LOG[1] + (if ITQ_LOG.count > 1 then "\\nFull list in MAXScript Listener (F11)." else "") else "")
 	itq_report()
 	format "ITQAN: material library synced (% Corona, % V-Ray materials).\\n" libC.count libV.count
 	dirs.count
@@ -260,7 +407,7 @@ macroScript ITQAN_SyncMaterials category:"ITQAN" buttonText:"ITQAN Materials" to
 	(
 		local f = itq_install root
 		local n = itq_sync root true
-		messageBox ("ITQAN material library is ready.\\n" + (n as string) + " material folder(s) synced.\\n\\nLibraries:\\n" + root + "ITQAN_Corona.mat\\n" + root + "ITQAN_VRay.mat\\n\\nOpen them once from the Slate Material Editor:\\nMaterial/Map Browser options > Open Material Library.\\nThey will stay listed and sync automatically every time 3ds Max starts.") title:"ITQAN Tools"
+		messageBox ("ITQAN material library setup\\n\\n" + ITQ_SUMMARY + "\\n\\nLibraries:\\n" + root + "ITQAN_Corona.mat\\n" + root + "ITQAN_VRay.mat\\n\\nOpen them once from the Slate Material Editor:\\nMaterial/Map Browser options > Open Material Library.\\nThey sync automatically every time 3ds Max starts.") title:"ITQAN Tools"
 	)
 )
 `;
